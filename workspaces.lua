@@ -36,6 +36,8 @@ local screen_watcher = nil    -- hs.screen.watcher instance
 local scratch_name = nil -- name of the scratch workspace (no tiling)
 local pre_scratch = nil  -- workspace we came from before entering scratch
 local ws_filter = nil    -- separate window filter for workspace lifecycle hooks
+local jump_targets = {}  -- category -> { workspace -> appName }
+local prev_jump = nil    -- { workspace = name, window_id = id } for toggle-jump
 
 ---user callback, called with workspace name after switching
 ---@type fun(name: string)|nil
@@ -233,17 +235,29 @@ local function validateSnapshot(snap, ws_name)
     return snap
 end
 
+---capture current position as jump point (workspace + focused window)
+local function saveJumpPoint()
+    local focused = Window.focusedWindow()
+    if not focused then return end
+    local id = focused:id()
+    if not id then return end
+    prev_jump = { workspace = current, window_id = id }
+end
+
 ---initialize workspaces
----@param names string[] workspace names
----@param rules table<string,string> appName -> workspace name mapping
-function Workspaces.setup(names, rules)
+---@param opts table { workspaces=string[], appRules=table, jumpTargets=table }
+function Workspaces.setup(opts)
+    local names = opts.workspaces or {}
+    local rules = opts.appRules or {}
+    jump_targets = opts.jumpTargets or {}
+
     for _, name in ipairs(names) do
         ws_windows[name] = {}
     end
     current = names[1]
 
     -- Build app rules
-    for appName, wsName in pairs(rules or {}) do
+    for appName, wsName in pairs(rules) do
         app_rules[appName] = wsName
     end
 
@@ -328,9 +342,9 @@ function Workspaces.setup(names, rules)
     ws_filter:subscribe(WindowFilter.windowFocused, function(win) Workspaces.onWindowFocused(win) end)
 end
 
----switch to a workspace
+---internal workspace switch (no jump tracking)
 ---@param name string workspace to switch to
-function Workspaces.switchTo(name)
+local function _doSwitch(name)
     if not ws_windows[name] or name == current or switching then return end
     switching = true
 
@@ -513,6 +527,13 @@ function Workspaces.switchTo(name)
         ms(t0, t_end), #restore_ops, #park_ops))
 end
 
+---switch to a workspace (saves jump point first)
+---@param name string workspace to switch to
+function Workspaces.switchTo(name)
+    saveJumpPoint()
+    _doSwitch(name)
+end
+
 ---move the focused window to a different workspace
 ---@param name string target workspace
 function Workspaces.moveWindowTo(name)
@@ -660,6 +681,10 @@ function Workspaces.onWindowDestroyed(win)
     if wsName and ws_focused[wsName] == id then
         ws_focused[wsName] = nil
     end
+    -- Clear jump target if it pointed to this window
+    if prev_jump and prev_jump.window_id == id then
+        prev_jump = nil
+    end
 end
 
 ---handle window focus — switch workspace if focused window is on a different one
@@ -683,7 +708,7 @@ function Workspaces.onWindowFocused(win)
         focus_timer = nil
         local now_focused = Window.focusedWindow()
         if now_focused and now_focused:id() == id and win_ws[id] and win_ws[id] ~= current then
-            Workspaces.switchTo(win_ws[id])
+            _doSwitch(win_ws[id])
         end
     end)
 end
@@ -743,6 +768,66 @@ function Workspaces.dump()
     print(table.concat(output, "\n"))
 end
 
+---jump to a specific app category on the current workspace
+---@param category string e.g. "browser", "terminal", "llm", "comms"
+function Workspaces.jumpToApp(category)
+    local targets = jump_targets[category]
+    if not targets then return end
+    local appName = targets[current]
+    if not appName then return end
+
+    saveJumpPoint()
+
+    -- Find app by name (single AX call), then match its windows against current workspace
+    local app = hs.application.find(appName)
+    if app then
+        local ws_ids = ws_windows[current] or {}
+        for _, win in ipairs(app:allWindows()) do
+            local id = win:id()
+            if id and ws_ids[id] then
+                win:focus()
+                return
+            end
+        end
+    end
+
+    -- No window found on this workspace — launch or focus the app
+    hs.application.launchOrFocus(appName)
+end
+
+---toggle between current position and previous jump target
+function Workspaces.toggleJump()
+    if not prev_jump then return end
+
+    -- Capture current position before jumping
+    local focused = Window.focusedWindow()
+    local cur = nil
+    if focused and focused:id() then
+        cur = { workspace = current, window_id = focused:id() }
+    end
+
+    local target_ws = prev_jump.workspace
+    local target_wid = prev_jump.window_id
+
+    -- Swap: current becomes prev_jump
+    prev_jump = cur
+
+    if target_ws ~= current then
+        -- Cross-workspace jump: set target as the focus hint, then switch
+        if target_wid then
+            ws_focused[target_ws] = target_wid
+        end
+        _doSwitch(target_ws)
+    else
+        -- Same workspace: just focus the target window
+        -- Validate target still exists on this workspace
+        if target_wid and ws_windows[current] and ws_windows[current][target_wid] then
+            local win = Window.get(target_wid)
+            if win then win:focus() end
+        end
+    end
+end
+
 ---mark a workspace as the scratch (no-tiling) workspace
 ---@param name string workspace name to use as scratch
 function Workspaces.setupScratch(name)
@@ -753,10 +838,10 @@ end
 function Workspaces.toggleScratch()
     if not scratch_name then return end
     if current == scratch_name then
-        Workspaces.switchTo(pre_scratch or "personal")
+        _doSwitch(pre_scratch or "personal")
     else
         pre_scratch = current
-        Workspaces.switchTo(scratch_name)
+        _doSwitch(scratch_name)
     end
 end
 
