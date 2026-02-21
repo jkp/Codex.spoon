@@ -1,28 +1,30 @@
---- === PaperWM.spoon ===
+--- === Codex.spoon ===
 ---
 --- Tile windows horizontally. Inspired by PaperWM Gnome extension.
+--- Codex: bound pages that replaced paper scrolls — scrolling within
+--- workspaces, flipping between them.
 ---
 --- # Usage
 ---
---- `PaperWM:start()` will begin automatically tiling new and existing windows.
---- `PaperWM:stop()` will release control over windows.
+--- `Codex:start()` will begin automatically tiling new and existing windows.
+--- `Codex:stop()` will release control over windows.
 ---
---- Set window gaps using `PaperWM.window_gap`:
+--- Set window gaps using `Codex.window_gap`:
 --- - As a single number: same gap for all sides
 --- - As a table with specific sides: `{top=8, bottom=8, left=8, right=8}`
 ---
 --- For example:
 --- ```
---- PaperWM.window_gap = 10  -- 10px gap on all sides
+--- Codex.window_gap = 10  -- 10px gap on all sides
 --- -- or
---- PaperWM.window_gap = {top=10, bottom=8, left=12, right=12}
+--- Codex.window_gap = {top=10, bottom=8, left=12, right=12}
 --- ```
 ---
---- Overwrite `PaperWM.window_filter` to ignore specific applications. For example:
+--- Overwrite `Codex.window_filter` to ignore specific applications. For example:
 ---
 --- ```
---- PaperWM.window_filter = PaperWM.window_filter:setAppFilter("Finder", false)
---- PaperWM:start() -- restart for new window filter to take effect
+--- Codex.window_filter = Codex.window_filter:setAppFilter("Finder", false)
+--- Codex:start() -- restart for new window filter to take effect
 --- ```
 ---
 --- # Limitations
@@ -38,22 +40,22 @@
 --- Arrange screens vertically to prevent windows from bleeding into other screens.
 ---
 ---
---- Download: [https://github.com/mogenson/PaperWM.spoon](https://github.com/mogenson/PaperWM.spoon)
+--- Download: [https://github.com/jkp/Codex.spoon](https://github.com/jkp/Codex.spoon)
 local Spaces <const> = hs.spaces
 
-local PaperWM = {}
-PaperWM.__index = PaperWM
+local Codex = {}
+Codex.__index = Codex
 
 -- Metadata
-PaperWM.name = "PaperWM"
-PaperWM.version = "1.0"
-PaperWM.author = "Michael Mogenson"
-PaperWM.homepage = "https://github.com/mogenson/PaperWM.spoon"
-PaperWM.license = "MIT - https://opensource.org/licenses/MIT"
+Codex.name = "Codex"
+Codex.version = "1.0"
+Codex.author = "Michael Mogenson, Jamie Kirkpatrick"
+Codex.homepage = "https://github.com/jkp/Codex.spoon"
+Codex.license = "MIT - https://opensource.org/licenses/MIT"
 
 -- Types
 
----@alias PaperWM table PaperWM module object
+---@alias Codex table Codex module object
 ---@alias Window userdata a ui.window
 ---@alias Frame table hs.geometry.rect
 ---@alias Index { row: number, col: number, space: number }
@@ -62,35 +64,39 @@ PaperWM.license = "MIT - https://opensource.org/licenses/MIT"
 ---@alias Mapping { [string]: (table | string)[]}
 
 -- logger
-PaperWM.logger = hs.logger.new(PaperWM.name)
+Codex.logger = hs.logger.new(Codex.name)
 
 -- Load modules
-PaperWM.config = dofile(hs.spoons.resourcePath("config.lua"))
-PaperWM.state = dofile(hs.spoons.resourcePath("state.lua"))
-PaperWM.windows = dofile(hs.spoons.resourcePath("windows.lua"))
-PaperWM.space = dofile(hs.spoons.resourcePath("space.lua"))
-PaperWM.events = dofile(hs.spoons.resourcePath("events.lua"))
-PaperWM.actions = dofile(hs.spoons.resourcePath("actions.lua"))
-PaperWM.floating = dofile(hs.spoons.resourcePath("floating.lua"))
-PaperWM.tiling = dofile(hs.spoons.resourcePath("tiling.lua"))
+Codex.config = dofile(hs.spoons.resourcePath("config.lua"))
+Codex.state = dofile(hs.spoons.resourcePath("state.lua"))
+Codex.windows = dofile(hs.spoons.resourcePath("windows.lua"))
+Codex.space = dofile(hs.spoons.resourcePath("space.lua"))
+Codex.events = dofile(hs.spoons.resourcePath("events.lua"))
+Codex.actions = dofile(hs.spoons.resourcePath("actions.lua"))
+Codex.floating = dofile(hs.spoons.resourcePath("floating.lua"))
+Codex.tiling = dofile(hs.spoons.resourcePath("tiling.lua"))
+Codex.workspaces = dofile(hs.spoons.resourcePath("workspaces.lua"))
+Codex.scratch = dofile(hs.spoons.resourcePath("scratch.lua"))
 
 -- Initialize modules
-PaperWM.windows.init(PaperWM)
-PaperWM.space.init(PaperWM)
-PaperWM.events.init(PaperWM)
-PaperWM.actions.init(PaperWM)
-PaperWM.state.init(PaperWM)
-PaperWM.floating.init(PaperWM)
-PaperWM.tiling.init(PaperWM)
+Codex.windows.init(Codex)
+Codex.space.init(Codex)
+Codex.events.init(Codex)
+Codex.actions.init(Codex)
+Codex.state.init(Codex)
+Codex.floating.init(Codex)
+Codex.tiling.init(Codex)
+Codex.workspaces.init(Codex)
+Codex.scratch.init(Codex)
 
 -- Apply config
-for k, v in pairs(PaperWM.config) do
-    PaperWM[k] = v
+for k, v in pairs(Codex.config) do
+    Codex[k] = v
 end
 
 ---start automatic window tiling
----@return PaperWM
-function PaperWM:start()
+---@return Codex
+function Codex:start()
     -- check for some settings
     if not Spaces.screensHaveSeparateSpaces() then
         self.logger.e(
@@ -113,8 +119,8 @@ function PaperWM:start()
 end
 
 ---stop automatic window tiling
----@return PaperWM
-function PaperWM:stop()
+---@return Codex
+function Codex:stop()
     -- stop events
     self.events.stop()
 
@@ -126,12 +132,27 @@ function PaperWM:stop()
     return self
 end
 
-function PaperWM:tileSpace(space)
+function Codex:tileSpace(space)
     self.tiling.tileSpace(space)
 end
 
-function PaperWM:bindHotkeys(mapping)
+function Codex:bindHotkeys(mapping)
     self.actions.bindHotkeys(mapping)
 end
 
-return PaperWM
+---dispatch: run scratch_fn on scratch workspace, tiling_fn otherwise
+---@param scratch_fn function action for scratch workspace
+---@param tiling_fn function action for tiling workspaces
+---@return function
+function Codex:dispatch(scratch_fn, tiling_fn)
+    return function()
+        if self.workspaces and self.workspaces.scratchName()
+           and self.workspaces.currentSpace() == self.workspaces.scratchName() then
+            scratch_fn()
+        else
+            tiling_fn()
+        end
+    end
+end
+
+return Codex
