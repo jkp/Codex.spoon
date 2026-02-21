@@ -2,7 +2,7 @@
 
 package.preload["mocks"] = function() return dofile("spec/mocks.lua") end
 
-describe("PaperWM.windows", function()
+describe("Codex.windows", function()
     local Mocks = require("mocks")
     Mocks.init_mocks()
 
@@ -11,17 +11,17 @@ describe("PaperWM.windows", function()
     local Tiling = require("tiling")
     local Floating = require("floating")
 
-    local mock_paperwm = Mocks.get_mock_paperwm({ Windows = Windows, State = State, Tiling = Tiling, Floating = Floating })
+    local mock_codex = Mocks.get_mock_codex({ Windows = Windows, State = State, Tiling = Tiling, Floating = Floating })
     local mock_window = Mocks.mock_window
 
     local focused_window
 
     before_each(function()
         -- Reset state before each test
-        State.init(mock_paperwm)
-        Windows.init(mock_paperwm)
-        Floating.init(mock_paperwm)
-        Tiling.init(mock_paperwm)
+        State.init(mock_codex)
+        Windows.init(mock_codex)
+        Floating.init(mock_codex)
+        Tiling.init(mock_codex)
         hs.window.focusedWindow = function() return focused_window end
     end)
 
@@ -30,7 +30,7 @@ describe("PaperWM.windows", function()
             local win = mock_window(101, "Test Window")
             local space = Windows.addWindow(win)
 
-            local state = Windows.PaperWM.state.get()
+            local state = Windows.codex.state.get()
             assert.are.equal(1, space)
             assert.are.equal(1, #state.window_list[space])
             assert.are.equal(1, #state.window_list[space][1])
@@ -48,7 +48,7 @@ describe("PaperWM.windows", function()
 
             local space = Windows.addWindow(win)
 
-            local state = Windows.PaperWM.state.get()
+            local state = Windows.codex.state.get()
             assert.is_nil(space)
             assert.is_nil(state.index_table[101])
             assert.is_nil(state.ui_watchers[101])
@@ -61,7 +61,7 @@ describe("PaperWM.windows", function()
 
             local space = Windows.addWindow(win)
 
-            local state = Windows.PaperWM.state.get()
+            local state = Windows.codex.state.get()
             assert.are.equal(1, space)
             assert.are.equal(1, #state.window_list[space])
             assert.are.equal(1, #state.window_list[space][1])
@@ -79,7 +79,7 @@ describe("PaperWM.windows", function()
 
             local space = Windows.addWindow(win)
 
-            local state = Windows.PaperWM.state.get()
+            local state = Windows.codex.state.get()
             assert.are.equal(1, space)
             assert.are.equal(1, #state.window_list[space])
             assert.are.equal(1, #state.window_list[space][1])
@@ -97,7 +97,7 @@ describe("PaperWM.windows", function()
 
             local space = Windows.addWindow(win)
 
-            local state = Windows.PaperWM.state.get()
+            local state = Windows.codex.state.get()
             assert.are.equal(1, space)
             assert.are.equal(1, #state.window_list[space])
             assert.are.equal(1, #state.window_list[space][1])
@@ -117,7 +117,7 @@ describe("PaperWM.windows", function()
             Windows.addWindow(win1)
             Windows.addWindow(win2)
 
-            local state = Windows.PaperWM.state.get()
+            local state = Windows.codex.state.get()
             assert.are.equal(win1, state.window_list[1][1][1])
             assert.are.equal(win2, state.window_list[1][2][1])
         end)
@@ -130,7 +130,7 @@ describe("PaperWM.windows", function()
 
             local space = Windows.removeWindow(win, true)
 
-            local state = Windows.PaperWM.state.get()
+            local state = Windows.codex.state.get()
             assert.are.equal(1, space)
             assert.is_nil(state.window_list[space])
             assert.is_nil(state.index_table[101])
@@ -148,7 +148,7 @@ describe("PaperWM.windows", function()
 
             Windows.swapWindows(Windows.Direction.RIGHT)
 
-            local state = Windows.PaperWM.state.get()
+            local state = Windows.codex.state.get()
             assert.are.equal(win2, state.window_list[1][1][1])
             assert.are.equal(win1, state.window_list[1][2][1])
         end)
@@ -163,7 +163,7 @@ describe("PaperWM.windows", function()
 
             Windows.swapWindows(Windows.Direction.DOWN)
 
-            local state = Windows.PaperWM.state.get()
+            local state = Windows.codex.state.get()
             assert.are.equal(win2, state.window_list[1][1][1])
             assert.are.equal(win1, state.window_list[1][1][2])
         end)
@@ -179,7 +179,7 @@ describe("PaperWM.windows", function()
 
             Windows.slurpWindow()
 
-            local state = Windows.PaperWM.state.get()
+            local state = Windows.codex.state.get()
             assert.are.equal(1, #state.window_list[1])    -- only one column left
             assert.are.equal(2, #state.window_list[1][1]) -- with two windows
             assert.are.equal(win1, state.window_list[1][1][1])
@@ -197,7 +197,7 @@ describe("PaperWM.windows", function()
 
             Windows.barfWindow()
 
-            local state = Windows.PaperWM.state.get()
+            local state = Windows.codex.state.get()
             assert.are.equal(2, #state.window_list[1])    -- two columns
             assert.are.equal(1, #state.window_list[1][1]) -- one window in first column
             assert.are.equal(1, #state.window_list[1][2]) -- one window in second column

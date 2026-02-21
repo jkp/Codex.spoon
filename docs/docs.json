@@ -1,6 +1,6 @@
 [
   {
-    "name": "PaperWM",
-    "desc": "Tiled scrollable window manager for MacOS. Inspired by PaperWM."
+    "name": "Codex",
+    "desc": "Tiled scrollable window manager with virtual workspaces for macOS. Forked from PaperWM.spoon."
   }
 ]

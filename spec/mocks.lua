@@ -34,7 +34,7 @@ function M.mock_window(id, title, frame)
     }
 end
 
-function M.get_mock_paperwm(modules)
+function M.get_mock_codex(modules)
     return {
         state = modules.State,
         windows = modules.Windows,

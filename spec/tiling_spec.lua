@@ -6,7 +6,7 @@ package.preload["windows"] = function() return dofile("windows.lua") end
 package.preload["state"] = function() return dofile("state.lua") end
 package.preload["floating"] = function() return dofile("floating.lua") end
 
-describe("PaperWM.tiling", function()
+describe("Codex.tiling", function()
     local Mocks = require("mocks")
     Mocks.init_mocks()
 
@@ -15,23 +15,23 @@ describe("PaperWM.tiling", function()
     local State = require("state")
     local Floating = require("floating")
 
-    local mock_paperwm = Mocks.get_mock_paperwm({ Tiling = Tiling, Windows = Windows, State = State, Floating = Floating })
+    local mock_codex = Mocks.get_mock_codex({ Tiling = Tiling, Windows = Windows, State = State, Floating = Floating })
     local mock_window = Mocks.mock_window
 
     local focused_window
 
     before_each(function()
         -- Reset state before each test
-        State.init(mock_paperwm)
-        Windows.init(mock_paperwm)
-        Floating.init(mock_paperwm)
-        Tiling.init(mock_paperwm)
+        State.init(mock_codex)
+        Windows.init(mock_codex)
+        Floating.init(mock_codex)
+        Tiling.init(mock_codex)
         hs.window.focusedWindow = function() return focused_window end
     end)
 
     describe("tileSpace", function()
         it("should tile a single window to fit in the screen with external_bar", function()
-            mock_paperwm.external_bar = { top = 40 }
+            mock_codex.external_bar = { top = 40 }
             local win = mock_window(101, "Test Window", { x = 0, y = 0, w = 100, h = 100 })
             Windows.addWindow(win)
             focused_window = win
@@ -45,7 +45,7 @@ describe("PaperWM.tiling", function()
             assert.are.equal(644, frame.h)
         end)
         it("should tile two windows side-by-side with external_bar", function()
-            mock_paperwm.external_bar = { top = 40 }
+            mock_codex.external_bar = { top = 40 }
             local win1 = mock_window(101, "Window 1", { x = 0, y = 0, w = 100, h = 100 })
             local win2 = mock_window(102, "Window 2", { x = 200, y = 0, w = 100, h = 100 })
             Windows.addWindow(win1)
@@ -67,7 +67,7 @@ describe("PaperWM.tiling", function()
             assert.are.equal(692, frame2.y2) -- tileColumn sets y2
         end)
         it("should tile a single window to fit in the screen", function()
-            mock_paperwm.external_bar = nil
+            mock_codex.external_bar = nil
             local win = mock_window(101, "Test Window", { x = 0, y = 0, w = 100, h = 100 })
             Windows.addWindow(win)
             focused_window = win
@@ -82,7 +82,7 @@ describe("PaperWM.tiling", function()
         end)
 
         it("should tile two windows side-by-side", function()
-            mock_paperwm.external_bar = nil
+            mock_codex.external_bar = nil
             local win1 = mock_window(101, "Window 1", { x = 0, y = 0, w = 100, h = 100 })
             local win2 = mock_window(102, "Window 2", { x = 200, y = 0, w = 100, h = 100 })
             Windows.addWindow(win1)

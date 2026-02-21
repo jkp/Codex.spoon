@@ -6,17 +6,17 @@ local Tiling = {}
 Tiling._index = Tiling
 
 
----initialize module with reference to PaperWM
----@param paperwm PaperWM
-function Tiling.init(paperwm)
-    Tiling.PaperWM = paperwm
+---initialize module with reference to Codex
+---@param codex Codex
+function Tiling.init(codex)
+    Tiling.codex = codex
 end
 
 ---update the virtual x position for a table of windows on the specified space
 ---@param space Space
 ---@param windows Window[]
 local function update_virtual_positions(space, windows, x)
-    local x_positions = Tiling.PaperWM.state.xPositions(space)
+    local x_positions = Tiling.codex.state.xPositions(space)
     for _, window in ipairs(windows) do
         x_positions[window:id()] = x
     end
@@ -32,7 +32,7 @@ end
 ---@return number width of tiled column
 function Tiling.tileColumn(windows, bounds, h, w, id, h4id)
     local last_window, frame
-    local bottom_gap = Tiling.PaperWM.windows.getGap("bottom")
+    local bottom_gap = Tiling.codex.windows.getGap("bottom")
 
     for _, window in ipairs(windows) do
         frame = window:frame()
@@ -52,14 +52,14 @@ function Tiling.tileColumn(windows, bounds, h, w, id, h4id)
         frame.y = bounds.y
         frame.w = w
         frame.y2 = math.min(frame.y2, bounds.y2) -- don't overflow bottom of bounds
-        Tiling.PaperWM.windows.moveWindow(window, frame)
+        Tiling.codex.windows.moveWindow(window, frame)
         bounds.y = math.min(frame.y2 + bottom_gap, bounds.y2)
         last_window = window
     end
     -- expand last window height to bottom
     if frame.y2 ~= bounds.y2 then
         frame.y2 = bounds.y2
-        Tiling.PaperWM.windows.moveWindow(last_window, frame)
+        Tiling.codex.windows.moveWindow(last_window, frame)
     end
     return w -- return width of column
 end
@@ -68,44 +68,44 @@ end
 ---@param space Space
 function Tiling.tileSpace(space)
     if not space or Spaces.spaceType(space) ~= "user" then
-        Tiling.PaperWM.logger.e("current space invalid")
+        Tiling.codex.logger.e("current space invalid")
         return
     end
 
     -- find screen for space
     local screen = Screen(Spaces.spaceDisplay(space))
     if not screen then
-        Tiling.PaperWM.logger.e("no screen for space")
+        Tiling.codex.logger.e("no screen for space")
         return
     end
 
     -- if focused window is in space, tile from that
     local focused_window = Window.focusedWindow()
     local anchor_window = (function()
-        if focused_window and not Tiling.PaperWM.floating.isFloating(focused_window) and Spaces.windowSpaces(focused_window)[1] == space then
+        if focused_window and not Tiling.codex.floating.isFloating(focused_window) and Spaces.windowSpaces(focused_window)[1] == space then
             return focused_window
         else
-            return Tiling.PaperWM.windows.getFirstVisibleWindow(space, screen:frame())
+            return Tiling.codex.windows.getFirstVisibleWindow(space, screen:frame())
         end
     end)()
 
     if not anchor_window then
-        Tiling.PaperWM.logger.e("no anchor window in space")
+        Tiling.codex.logger.e("no anchor window in space")
         return
     end
 
-    local anchor_index = Tiling.PaperWM.state.windowIndex(anchor_window)
+    local anchor_index = Tiling.codex.state.windowIndex(anchor_window)
     if not anchor_index then
-        Tiling.PaperWM.logger.e("anchor index not found, refreshing windows")
-        Tiling.PaperWM.windows.refreshWindows() -- try refreshing the windows
+        Tiling.codex.logger.e("anchor index not found, refreshing windows")
+        Tiling.codex.windows.refreshWindows() -- try refreshing the windows
         return                                  -- bail
     end
 
     -- get some global coordinates
     local screen_frame <const> = screen:frame()
-    local left_margin <const> = screen_frame.x + Tiling.PaperWM.screen_margin
-    local right_margin <const> = screen_frame.x2 - Tiling.PaperWM.screen_margin
-    local canvas <const> = Tiling.PaperWM.windows.getCanvas(screen)
+    local left_margin <const> = screen_frame.x + Tiling.codex.screen_margin
+    local right_margin <const> = screen_frame.x2 - Tiling.codex.screen_margin
+    local canvas <const> = Tiling.codex.windows.getCanvas(screen)
 
     -- make sure anchor window is on screen
     local anchor_frame = anchor_window:frame()
@@ -117,19 +117,19 @@ function Tiling.tileSpace(space)
     end
 
     -- adjust anchor window column
-    local column = Tiling.PaperWM.state.windowList(space, anchor_index.col)
+    local column = Tiling.codex.state.windowList(space, anchor_index.col)
     if not column then
-        Tiling.PaperWM.logger.e("no anchor window column")
+        Tiling.codex.logger.e("no anchor window column")
         return
     end
 
     -- TODO: need a minimum window height
     if #column == 1 then
         anchor_frame.y, anchor_frame.h = canvas.y, canvas.h
-        Tiling.PaperWM.windows.moveWindow(anchor_window, anchor_frame)
+        Tiling.codex.windows.moveWindow(anchor_window, anchor_frame)
     else
         local n = #column - 1 -- number of other windows in column
-        local bottom_gap = Tiling.PaperWM.windows.getGap("bottom")
+        local bottom_gap = Tiling.codex.windows.getGap("bottom")
         local h =
             math.max(0, canvas.h - anchor_frame.h - (n * bottom_gap)) // n
         local bounds = {
@@ -142,19 +142,19 @@ function Tiling.tileSpace(space)
     end
     update_virtual_positions(space, column, anchor_frame.x)
 
-    local right_gap = Tiling.PaperWM.windows.getGap("right")
-    local left_gap = Tiling.PaperWM.windows.getGap("left")
+    local right_gap = Tiling.codex.windows.getGap("right")
+    local left_gap = Tiling.codex.windows.getGap("left")
 
     -- tile windows from anchor right
     local x = anchor_frame.x2 + right_gap
-    for col = anchor_index.col + 1, #(Tiling.PaperWM.state.windowList(space)) do
+    for col = anchor_index.col + 1, #(Tiling.codex.state.windowList(space)) do
         local bounds = {
             x = math.min(x, right_margin),
             x2 = nil,
             y = canvas.y,
             y2 = canvas.y2,
         }
-        local column = Tiling.PaperWM.state.windowList(space, col)
+        local column = Tiling.codex.state.windowList(space, col)
         local width = Tiling.tileColumn(column, bounds)
         update_virtual_positions(space, column, x)
         x = x + width + right_gap
@@ -169,7 +169,7 @@ function Tiling.tileSpace(space)
             y = canvas.y,
             y2 = canvas.y2,
         }
-        local column = Tiling.PaperWM.state.windowList(space, col)
+        local column = Tiling.codex.state.windowList(space, col)
         local width = Tiling.tileColumn(column, bounds)
         update_virtual_positions(space, column, x2 - width)
         x2 = x2 - width - left_gap

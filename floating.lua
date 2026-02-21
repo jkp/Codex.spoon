@@ -5,18 +5,18 @@ local Floating = {}
 Floating.__index = Floating
 
 ---hs.settings key for persisting is_floating, stored as an array of window id
-local IsFloatingKey <const> = "PaperWM_is_floating"
+local IsFloatingKey <const> = "Codex_is_floating"
 
----initialize module with reference to PaperWM
----@param paperwm PaperWM
-function Floating.init(paperwm)
-    Floating.PaperWM = paperwm
+---initialize module with reference to Codex
+---@param codex Codex
+function Floating.init(codex)
+    Floating.codex = codex
 end
 
 ---save the is floating state to settings
 function Floating.persistFloatingList()
     local persisted = {}
-    for k, _ in pairs(Floating.PaperWM.state.is_floating) do
+    for k, _ in pairs(Floating.codex.state.is_floating) do
         table.insert(persisted, k)
     end
     hs.settings.set(IsFloatingKey, persisted)
@@ -25,7 +25,7 @@ end
 ---remove window from the floating list before it is destroyed
 ---@param window Window
 function Floating.removeFloating(window)
-    Floating.PaperWM.state.is_floating[window:id()] = nil
+    Floating.codex.state.is_floating[window:id()] = nil
     Floating.persistFloatingList()
 end
 
@@ -34,8 +34,8 @@ function Floating.restoreFloating()
     local persisted = hs.settings.get(IsFloatingKey) or {}
     for _, id in ipairs(persisted) do
         local window = Window.get(id)
-        if window and Floating.PaperWM.window_filter:isWindowAllowed(window) then
-            Floating.PaperWM.state.is_floating[id] = true
+        if window and Floating.codex.window_filter:isWindowAllowed(window) then
+            Floating.codex.state.is_floating[id] = true
         end
     end
     Floating.persistFloatingList()
@@ -45,7 +45,7 @@ end
 ---@param window Window
 ---@return boolean
 function Floating.isFloating(window)
-    return Floating.PaperWM.state.is_floating[window:id()] or false
+    return Floating.codex.state.is_floating[window:id()] or false
 end
 
 ---add or remove focused window from the floating layer and retile the space
@@ -53,23 +53,23 @@ end
 function Floating.toggleFloating(window)
     window = window or Window.focusedWindow()
     if not window then
-        Floating.PaperWM.logger.d("focused window not found")
+        Floating.codex.logger.d("focused window not found")
         return
     end
 
-    Floating.PaperWM.state.is_floating[window:id()] = (Floating.isFloating(window) == false) and true or nil
+    Floating.codex.state.is_floating[window:id()] = (Floating.isFloating(window) == false) and true or nil
     Floating.persistFloatingList()
 
     local space = (function()
         if Floating.isFloating(window) then
-            return Floating.PaperWM.windows.removeWindow(window, true)
+            return Floating.codex.windows.removeWindow(window, true)
         else
-            return Floating.PaperWM.windows.addWindow(window)
+            return Floating.codex.windows.addWindow(window)
         end
     end)()
     if space then
         window:focus()
-        Floating.PaperWM:tileSpace(space)
+        Floating.codex:tileSpace(space)
     end
 end
 
@@ -78,7 +78,7 @@ function Floating.focusFloating()
     local focused_window = Window.focusedWindow()
 
     local windows_to_focus <const> = Fnutils.ifilter(Window.visibleWindows(), function(win)
-        return not Floating.PaperWM.state.isTiled(win:id())
+        return not Floating.codex.state.isTiled(win:id())
     end)
 
     for _, window in ipairs(windows_to_focus) do

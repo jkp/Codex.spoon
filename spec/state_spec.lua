@@ -3,17 +3,17 @@
 package.preload["mocks"] = function() return dofile("spec/mocks.lua") end
 package.preload["state"] = function() return dofile("state.lua") end
 
-describe("PaperWM.state", function()
+describe("Codex.state", function()
     local Mocks = require("mocks")
     Mocks.init_mocks()
 
     local State = require("state")
 
-    local mock_paperwm = Mocks.get_mock_paperwm({ State = State })
+    local mock_codex = Mocks.get_mock_codex({ State = State })
 
     before_each(function()
         -- Reset state before each test
-        State.init(mock_paperwm)
+        State.init(mock_codex)
     end)
 
     describe("isTiled", function()

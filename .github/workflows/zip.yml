@@ -14,16 +14,16 @@ jobs:
       - name: Make folder
         run: |
           mkdir Spoons
-          mkdir PaperWM.spoon
-          cp *.lua PaperWM.spoon
+          mkdir Codex.spoon
+          cp *.lua Codex.spoon
 
       - name: Create zip
-        run: zip -r -q Spoons/PaperWM.spoon.zip PaperWM.spoon
+        run: zip -r -q Spoons/Codex.spoon.zip Codex.spoon
 
       - name: Commit and push
         uses: EndBug/add-and-commit@v9
         with:
-          add: '["Spoons/PaperWM.spoon.zip --force"]'
+          add: '["Spoons/Codex.spoon.zip --force"]'
           message: "Bundle into zip"
           push: origin release --set-upstream --force
           new_branch: release

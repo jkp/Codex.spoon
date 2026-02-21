@@ -22,10 +22,10 @@ local Direction <const> = {
 }
 Windows.Direction = Direction
 
----initialize module with reference to PaperWM
----@param paperwm PaperWM
-function Windows.init(paperwm)
-    Windows.PaperWM = paperwm
+---initialize module with reference to Codex
+---@param codex Codex
+function Windows.init(codex)
+    Windows.codex = codex
 end
 
 ---return the first window that's completely on the screen
@@ -40,7 +40,7 @@ function Windows.getFirstVisibleWindow(space, screen_frame, direction)
     local off_screen_distance = -math.huge
     local off_screen_closest = nil
 
-    for _, windows in ipairs(Windows.PaperWM.state.windowList(space)) do
+    for _, windows in ipairs(Windows.codex.state.windowList(space)) do
         local window = windows[1] -- take first window in column
         local d = (function()
             if direction == Direction.LEFT then
@@ -66,7 +66,7 @@ end
 ---@param side string "top", "bottom", "left", or "right"
 ---@return number gap size in pixels
 function Windows.getGap(side)
-    local gap = Windows.PaperWM.window_gap
+    local gap = Windows.codex.window_gap
     if type(gap) == "number" then
         return gap            -- backward compatibility with single number
     elseif type(gap) == "table" then
@@ -86,7 +86,7 @@ function Windows.getCanvas(screen)
     local right_gap = Windows.getGap("right")
     local top_gap = Windows.getGap("top")
     local bottom_gap = Windows.getGap("bottom")
-    local external_bar = Windows.PaperWM.external_bar
+    local external_bar = Windows.codex.external_bar
     local external_bar_top = external_bar and external_bar.top
     local external_bar_bottom = external_bar and external_bar.bottom
     local frame_top = external_bar_top and screen_full_frame.y + external_bar_top or screen_frame.y
@@ -104,13 +104,13 @@ end
 ---get all windows across all spaces and retile them
 function Windows.refreshWindows()
     -- get all windows across spaces
-    local all_windows = Windows.PaperWM.window_filter:getWindows()
+    local all_windows = Windows.codex.window_filter:getWindows()
 
     local retile_spaces = {} -- spaces that need to be retiled
     for _, window in ipairs(all_windows) do
-        if Windows.PaperWM.state.isHidden(window:id()) then goto continue end
-        local index = Windows.PaperWM.state.windowIndex(window)
-        if Windows.PaperWM.floating.isFloating(window) then
+        if Windows.codex.state.isHidden(window:id()) then goto continue end
+        local index = Windows.codex.state.windowIndex(window)
+        if Windows.codex.floating.isFloating(window) then
             -- ignore floating windows
         elseif not index then
             -- add window
@@ -126,7 +126,7 @@ function Windows.refreshWindows()
     end
 
     -- retile spaces
-    for space, _ in pairs(retile_spaces) do Windows.PaperWM:tileSpace(space) end
+    for space, _ in pairs(retile_spaces) do Windows.codex:tileSpace(space) end
 end
 
 ---add a new window to be tracked and automatically tiled
@@ -134,7 +134,7 @@ end
 ---@return Space|nil space that contains new window
 function Windows.addWindow(add_window)
     -- don't add windows that are parked by virtual workspaces
-    if add_window:id() and Windows.PaperWM.state.isHidden(add_window:id()) then return end
+    if add_window:id() and Windows.codex.state.isHidden(add_window:id()) then return end
 
     -- A window with no tabs will have a tabCount of 0 or 1
     -- A new tab for a window will have tabCount equal to the total number of tabs
@@ -148,23 +148,23 @@ function Windows.addWindow(add_window)
         -- It's mostly built-in Apple apps like Finder and Terminal whose tabs
         -- show up as separate windows. Third party apps like Microsoft Office
         -- use tabs that are all contained within one window and tile fine.
-        hs.notify.show("PaperWM", "Windows with tabs are not supported!",
-            "See https://github.com/mogenson/PaperWM.spoon/issues/39")
+        hs.notify.show("Codex", "Windows with tabs are not supported!",
+            "See https://github.com/jkp/Codex.spoon/issues/39")
         return
     end
 
     -- ignore windows that have a zoom button, but are not maximizable
     if not add_window:isMaximizable() then
-        Windows.PaperWM.logger.d("ignoring non-maximizable window")
+        Windows.codex.logger.d("ignoring non-maximizable window")
         return
     end
 
     -- check if window is already in window list
-    if Windows.PaperWM.state.windowIndex(add_window) then return end
+    if Windows.codex.state.windowIndex(add_window) then return end
 
     local space = Spaces.windowSpaces(add_window)[1]
     if not space then
-        Windows.PaperWM.logger.e("add window does not have a space")
+        Windows.codex.logger.e("add window does not have a space")
         return
     end
 
@@ -175,13 +175,13 @@ function Windows.addWindow(add_window)
     -- focused_window from previous window focused event will not be add_window
     -- hs.window.focusedWindow() will return add_window
     -- new window focused event for add_window has not happened yet
-    if Windows.PaperWM.state.prev_focused_window and
-        ((Windows.PaperWM.state.windowIndex(Windows.PaperWM.state.prev_focused_window) or {}).space == space) and
-        (Windows.PaperWM.state.prev_focused_window:id() ~= add_window:id()) then -- insert to the right
-        add_column = Windows.PaperWM.state.windowIndex(Windows.PaperWM.state.prev_focused_window).col + 1
+    if Windows.codex.state.prev_focused_window and
+        ((Windows.codex.state.windowIndex(Windows.codex.state.prev_focused_window) or {}).space == space) and
+        (Windows.codex.state.prev_focused_window:id() ~= add_window:id()) then -- insert to the right
+        add_column = Windows.codex.state.windowIndex(Windows.codex.state.prev_focused_window).col + 1
     else
         local x = add_window:frame().center.x
-        for col, windows in ipairs(Windows.PaperWM.state.windowList(space)) do
+        for col, windows in ipairs(Windows.codex.state.windowList(space)) do
             if x < windows[1]:frame().center.x then
                 add_column = col     -- insert left of window
                 break                -- add_window will take this window's column
@@ -192,10 +192,10 @@ function Windows.addWindow(add_window)
     end
 
     -- add window
-    table.insert(Windows.PaperWM.state.windowList(space), add_column, { add_window })
+    table.insert(Windows.codex.state.windowList(space), add_column, { add_window })
 
     -- subscribe to window moved events
-    Windows.PaperWM.state.uiWatcherCreate(add_window)
+    Windows.codex.state.uiWatcherCreate(add_window)
 
     return space
 end
@@ -206,9 +206,9 @@ end
 ---@return Space|nil space that contained removed window
 function Windows.removeWindow(remove_window, skip_new_window_focus)
     -- get index of window and remove
-    local remove_index = Windows.PaperWM.state.windowIndex(remove_window, true)
+    local remove_index = Windows.codex.state.windowIndex(remove_window, true)
     if not remove_index then
-        Windows.PaperWM.logger.e("remove index not found")
+        Windows.codex.logger.e("remove index not found")
         return
     end
 
@@ -220,18 +220,18 @@ function Windows.removeWindow(remove_window, skip_new_window_focus)
 
     -- remove window
     assert(remove_window == table.remove(
-        Windows.PaperWM.state.windowList(remove_index.space, remove_index.col), remove_index.row)
+        Windows.codex.state.windowList(remove_index.space, remove_index.col), remove_index.row)
     )
 
     -- remove watcher
-    Windows.PaperWM.state.uiWatcherDelete(remove_window:id())
+    Windows.codex.state.uiWatcherDelete(remove_window:id())
 
     -- clear window position
-    Windows.PaperWM.state.xPositions(remove_index.space)[remove_window:id()] = nil
+    Windows.codex.state.xPositions(remove_index.space)[remove_window:id()] = nil
 
     -- clear dangling reference
-    if Windows.PaperWM.state.prev_focused_window == remove_window then
-        Windows.PaperWM.state.prev_focused_window = nil
+    if Windows.codex.state.prev_focused_window == remove_window then
+        Windows.codex.state.prev_focused_window = nil
     end
 
     return remove_index.space -- return space for removed window
@@ -245,16 +245,16 @@ function Windows.focusWindow(direction, focused_index)
         -- get current focused window
         local focused_window = Window.focusedWindow()
         if not focused_window then
-            Windows.PaperWM.logger.d("focused window not found")
+            Windows.codex.logger.d("focused window not found")
             return
         end
 
         -- get focused window index
-        focused_index = Windows.PaperWM.state.windowIndex(focused_window)
+        focused_index = Windows.codex.state.windowIndex(focused_window)
     end
 
     if not focused_index then
-        Windows.PaperWM.logger.e("focused index not found")
+        Windows.codex.logger.e("focused index not found")
         return
     end
 
@@ -263,23 +263,23 @@ function Windows.focusWindow(direction, focused_index)
     if direction == Direction.LEFT or direction == Direction.RIGHT then
         -- walk down column, looking for match in neighbor column
         for row = focused_index.row, 1, -1 do
-            new_focused_window = Windows.PaperWM.state.windowList(focused_index.space, focused_index.col + direction, row)
+            new_focused_window = Windows.codex.state.windowList(focused_index.space, focused_index.col + direction, row)
             if new_focused_window then break end
         end
     elseif direction == Direction.UP or direction == Direction.DOWN then
-        new_focused_window = Windows.PaperWM.state.windowList(focused_index.space, focused_index.col,
+        new_focused_window = Windows.codex.state.windowList(focused_index.space, focused_index.col,
             focused_index.row + (direction // 2))
     elseif direction == Direction.NEXT or direction == Direction.PREVIOUS then
         local diff = direction // Direction.NEXT -- convert to 1/-1
         local new_row_index = focused_index.row + diff
 
         -- first try above/below in same row
-        new_focused_window = Windows.PaperWM.state.windowList(focused_index.space, focused_index.col,
+        new_focused_window = Windows.codex.state.windowList(focused_index.space, focused_index.col,
             focused_index.row + diff)
 
         if not new_focused_window then
             -- get the bottom row in the previous column, or the first row in the next column
-            local adjacent_column = Windows.PaperWM.state.windowList(focused_index.space, focused_index.col + diff)
+            local adjacent_column = Windows.codex.state.windowList(focused_index.space, focused_index.col + diff)
             if adjacent_column then
                 local col_idx = 1
                 if diff < 0 then col_idx = #adjacent_column end
@@ -289,7 +289,7 @@ function Windows.focusWindow(direction, focused_index)
     end
 
     if not new_focused_window then
-        Windows.PaperWM.logger.d("new focused window not found")
+        Windows.codex.logger.d("new focused window not found")
         return
     end
 
@@ -299,7 +299,7 @@ function Windows.focusWindow(direction, focused_index)
     -- try to prevent MacOS from stealing focus away to another window
     Timer.doAfter(Window.animationDuration, function()
         if Window.focusedWindow() ~= new_focused_window then
-            Windows.PaperWM.logger.df("refocusing window %s", new_focused_window)
+            Windows.codex.logger.df("refocusing window %s", new_focused_window)
             new_focused_window:focus()
         end
     end)
@@ -312,7 +312,7 @@ end
 function Windows.focusWindowAt(n)
     local screen = Screen.mainScreen()
     local space = Spaces.activeSpaces()[screen:getUUID()]
-    local columns = Windows.PaperWM.state.windowList(space)
+    local columns = Windows.codex.state.windowList(space)
     if #columns == 0 then return end
 
     local i = 1
@@ -336,32 +336,32 @@ end
 function Windows.swapWindows(direction)
     local focused_window = Window.focusedWindow()
     if not focused_window then
-        Windows.PaperWM.logger.d("focused window not found")
+        Windows.codex.logger.d("focused window not found")
         return
     end
 
-    local focused_index = Windows.PaperWM.state.windowIndex(focused_window)
+    local focused_index = Windows.codex.state.windowIndex(focused_window)
     if not focused_index then
-        Windows.PaperWM.logger.e("focused index not found")
+        Windows.codex.logger.e("focused index not found")
         return
     end
 
     if direction == Direction.LEFT or direction == Direction.RIGHT then
-        local columns = Windows.PaperWM.state.windowList(focused_index.space)
+        local columns = Windows.codex.state.windowList(focused_index.space)
         if not columns then
-            Windows.PaperWM.logger.ef("no windows on space %d", focused_index.space)
+            Windows.codex.logger.ef("no windows on space %d", focused_index.space)
             return
         end
 
         local current_column = focused_index.col
         if not columns[current_column] then
-            Windows.PaperWM.logger.ef("no current column %d on space %d", current_column, focused_index.space)
+            Windows.codex.logger.ef("no current column %d on space %d", current_column, focused_index.space)
             return
         end
 
         local target_column = focused_index.col + direction
         if not columns[target_column] then
-            Windows.PaperWM.logger.ef("no target column %d on space %d", target_column, focused_index.space)
+            Windows.codex.logger.ef("no target column %d on space %d", target_column, focused_index.space)
             return
         end
 
@@ -375,9 +375,9 @@ function Windows.swapWindows(direction)
         local windows = table.remove(columns, current_column)
         table.insert(columns, target_column, windows)
     elseif direction == Direction.UP or direction == Direction.DOWN then
-        local windows = Windows.PaperWM.state.windowList(focused_index.space, focused_index.col)
+        local windows = Windows.codex.state.windowList(focused_index.space, focused_index.col)
         if not windows then
-            Windows.PaperWM.logger.ef("no windows in column %d on space %d", focused_index.col, focused_index.space)
+            Windows.codex.logger.ef("no windows in column %d on space %d", focused_index.col, focused_index.space)
             return
         end
 
@@ -390,7 +390,7 @@ function Windows.swapWindows(direction)
     end
 
     -- update layout
-    Windows.PaperWM:tileSpace(focused_index.space)
+    Windows.codex:tileSpace(focused_index.space)
 end
 
 ---move the focused window to the center of the screen, horizontally
@@ -399,7 +399,7 @@ function Windows.centerWindow()
     -- get current focused window
     local focused_window = Window.focusedWindow()
     if not focused_window then
-        Windows.PaperWM.logger.d("focused window not found")
+        Windows.codex.logger.d("focused window not found")
         return
     end
 
@@ -414,7 +414,7 @@ function Windows.centerWindow()
 
     -- update layout
     local space = Spaces.windowSpaces(focused_window)[1]
-    Windows.PaperWM:tileSpace(space)
+    Windows.codex:tileSpace(space)
 end
 
 ---set the focused window to the width of the screen and cache the original width
@@ -448,19 +448,19 @@ function Windows.toggleWindowFullWidth()
         -- update layout
         Windows.moveWindow(focused_window, focused_frame)
         local space = Spaces.windowSpaces(focused_window)[1]
-        Windows.PaperWM:tileSpace(space)
+        Windows.codex:tileSpace(space)
     end
 end
 
 ---resize the width or height of the window, keeping the other dimension the
----same. cycles through the ratios specified in PaperWM.window_ratios
+---same. cycles through the ratios specified in Codex.window_ratios
 ---@param direction Direction use Direction.WIDTH or Direction.HEIGHT
 ---@param cycle_direction Direction use Direction.ASCENDING or DESCENDING
 function Windows.cycleWindowSize(direction, cycle_direction)
     -- get current focused window
     local focused_window = Window.focusedWindow()
     if not focused_window then
-        Windows.PaperWM.logger.d("focused window not found")
+        Windows.codex.logger.d("focused window not found")
         return
     end
 
@@ -477,7 +477,7 @@ function Windows.cycleWindowSize(direction, cycle_direction)
         local sizes = {}
         local new_size = nil
         if cycle_direction == Direction.ASCENDING then
-            for index, ratio in ipairs(Windows.PaperWM.window_ratios) do
+            for index, ratio in ipairs(Windows.codex.window_ratios) do
                 sizes[index] = ratio * (area_size + gap) - gap
             end
 
@@ -490,7 +490,7 @@ function Windows.cycleWindowSize(direction, cycle_direction)
                 end
             end
         elseif cycle_direction == Direction.DESCENDING then
-            for index, ratio in ipairs(Windows.PaperWM.window_ratios) do
+            for index, ratio in ipairs(Windows.codex.window_ratios) do
                 sizes[index] = ratio * (area_size + gap) - gap
             end
 
@@ -503,7 +503,7 @@ function Windows.cycleWindowSize(direction, cycle_direction)
                 end
             end
         else
-            Windows.PaperWM.logger.e(
+            Windows.codex.logger.e(
                 "cycle_direction must be either Direction.ASCENDING or Direction.DESCENDING")
         end
 
@@ -525,7 +525,7 @@ function Windows.cycleWindowSize(direction, cycle_direction)
         focused_frame.y = focused_frame.y -
             math.max(0, focused_frame.y2 - canvas.y2)
     else
-        Windows.PaperWM.logger.e(
+        Windows.codex.logger.e(
             "direction must be either Direction.WIDTH or Direction.HEIGHT")
         return
     end
@@ -535,7 +535,7 @@ function Windows.cycleWindowSize(direction, cycle_direction)
 
     -- update layout
     local space = Spaces.windowSpaces(focused_window)[1]
-    Windows.PaperWM:tileSpace(space)
+    Windows.codex:tileSpace(space)
 end
 
 ---resize the focused window in a direction by scale amount
@@ -545,7 +545,7 @@ function Windows.increaseWindowSize(direction, scale)
     -- get current focused window
     local focused_window = Window.focusedWindow()
     if not focused_window then
-        Windows.PaperWM.logger.d("focused window not found")
+        Windows.codex.logger.d("focused window not found")
         return
     end
 
@@ -572,7 +572,7 @@ function Windows.increaseWindowSize(direction, scale)
 
     -- update layout
     local space = Spaces.windowSpaces(focused_window)[1]
-    Windows.PaperWM:tileSpace(space)
+    Windows.codex:tileSpace(space)
 end
 
 ---tile a column of windows so they each have an equal height
@@ -590,7 +590,7 @@ local function tile_column_equaly(windows)
         y2 = canvas.y2,
     }
     local h = math.max(0, canvas.h - ((num_windows - 1) * bottom_gap)) // num_windows
-    Windows.PaperWM.tiling.tileColumn(windows, bounds, h)
+    Windows.codex.tiling.tileColumn(windows, bounds, h)
 end
 
 ---take the current focused window and move it into the bottom of
@@ -604,29 +604,29 @@ function Windows.slurpWindow()
     -- get current focused window
     local focused_window = Window.focusedWindow()
     if not focused_window then
-        Windows.PaperWM.logger.d("focused window not found")
+        Windows.codex.logger.d("focused window not found")
         return
     end
 
     -- get window index
-    local focused_index = Windows.PaperWM.state.windowIndex(focused_window)
+    local focused_index = Windows.codex.state.windowIndex(focused_window)
     if not focused_index then
-        Windows.PaperWM.logger.e("focused index not found")
+        Windows.codex.logger.e("focused index not found")
         return
     end
 
     -- get current column
-    local current_column = Windows.PaperWM.state.windowList(focused_index.space, focused_index.col)
+    local current_column = Windows.codex.state.windowList(focused_index.space, focused_index.col)
     if not current_column then
-        Windows.PaperWM.logger.ef("current column %d not found on space %d", focused_index.col, focused_index.space)
+        Windows.codex.logger.ef("current column %d not found on space %d", focused_index.col, focused_index.space)
         return
     end
 
     -- get column to left
     local target_index = focused_index.col - 1
-    local target_column = Windows.PaperWM.state.windowList(focused_index.space, target_index)
+    local target_column = Windows.codex.state.windowList(focused_index.space, target_index)
     if not target_column then
-        Windows.PaperWM.logger.df("target column %d not found on space %d", target_index, focused_index.space)
+        Windows.codex.logger.df("target column %d not found on space %d", target_index, focused_index.space)
         return
     end
 
@@ -635,11 +635,11 @@ function Windows.slurpWindow()
     table.insert(target_column, focused_window)
 
     -- final column frames should be equal in height
-    local final_column = Windows.PaperWM.state.windowList(focused_index.space, target_index)
+    local final_column = Windows.codex.state.windowList(focused_index.space, target_index)
     tile_column_equaly(final_column)
 
     -- update layout
-    Windows.PaperWM:tileSpace(focused_index.space)
+    Windows.codex:tileSpace(focused_index.space)
 end
 
 ---remove focused window from it's current column and place into
@@ -652,31 +652,31 @@ function Windows.barfWindow()
     -- get current focused window
     local focused_window = Window.focusedWindow()
     if not focused_window then
-        Windows.PaperWM.logger.d("focused window not found")
+        Windows.codex.logger.d("focused window not found")
         return
     end
 
     -- get window index
-    local focused_index = Windows.PaperWM.state.windowIndex(focused_window)
+    local focused_index = Windows.codex.state.windowIndex(focused_window)
     if not focused_index then
-        Windows.PaperWM.logger.e("focused index not found")
+        Windows.codex.logger.e("focused index not found")
         return
     end
 
     -- get column
-    local current_column = Windows.PaperWM.state.windowList(focused_index.space, focused_index.col)
+    local current_column = Windows.codex.state.windowList(focused_index.space, focused_index.col)
     if not current_column then
-        Windows.PaperWM.logger.ef("current column %d not found on space %d", focused_index.col, focused_index.space)
+        Windows.codex.logger.ef("current column %d not found on space %d", focused_index.col, focused_index.space)
         return
     elseif #current_column == 1 then
-        Windows.PaperWM.logger.d("only window in column")
+        Windows.codex.logger.d("only window in column")
         return
     end
 
     -- remove window and insert in new column
     local target_column = focused_index.col + 1
     assert(focused_window == table.remove(current_column, focused_index.row))
-    table.insert(Windows.PaperWM.state.windowList(focused_index.space), target_column, { focused_window })
+    table.insert(Windows.codex.state.windowList(focused_index.space), target_column, { focused_window })
 
     -- move focused window to target column location
     local focused_frame = focused_window:frame()
@@ -684,11 +684,11 @@ function Windows.barfWindow()
     Windows.moveWindow(focused_window, focused_frame)
 
     -- remaining column frames should be equal in height
-    local final_column = Windows.PaperWM.state.windowList(focused_index.space, focused_index.col)
+    local final_column = Windows.codex.state.windowList(focused_index.space, focused_index.col)
     tile_column_equaly(final_column)
 
     -- update layout
-    Windows.PaperWM:tileSpace(focused_index.space)
+    Windows.codex:tileSpace(focused_index.space)
 end
 
 ---move and resize a window to the coordinates specified by the frame
@@ -701,17 +701,17 @@ function Windows.moveWindow(window, frame)
     local id = window:id()
 
     -- don't reposition windows parked by virtual workspaces
-    if id and Windows.PaperWM.state.isHidden(id) then return end
+    if id and Windows.codex.state.isHidden(id) then return end
 
     if frame == window:frame() then
-        Windows.PaperWM.logger.v("no change in window frame")
+        Windows.codex.logger.v("no change in window frame")
         return
     end
 
-    Windows.PaperWM.state.uiWatcherStop(id)
+    Windows.codex.state.uiWatcherStop(id)
     window:setFrame(frame)
     Timer.doAfter(Window.animationDuration + padding, function()
-        Windows.PaperWM.state.uiWatcherStart(id)
+        Windows.codex.state.uiWatcherStart(id)
     end)
 end
 

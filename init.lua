@@ -1,6 +1,6 @@
 --- === Codex.spoon ===
 ---
---- Tile windows horizontally. Inspired by PaperWM Gnome extension.
+--- Tile windows horizontally. Forked from PaperWM.spoon, inspired by PaperWM.
 --- Codex: bound pages that replaced paper scrolls — scrolling within
 --- workspaces, flipping between them.
 ---

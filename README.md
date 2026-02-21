@@ -1,335 +1,311 @@
-# PaperWM.spoon
+# Codex.spoon
 
-Tiled scrollable window manager for MacOS. Inspired by
-[PaperWM](https://github.com/paperwm/PaperWM).
+Tiled scrollable window manager with virtual workspaces for macOS.
+A [Hammerspoon](https://www.hammerspoon.org) Spoon, forked from
+[PaperWM.spoon](https://github.com/mogenson/PaperWM.spoon).
 
-Spoon plugin for [HammerSpoon](https://www.hammerspoon.org) MacOS automation
-app.
+## Why Codex?
 
-# Demo
+PaperWM.spoon nailed horizontal scrolling tiling on macOS. What it lacked:
 
-https://user-images.githubusercontent.com/900731/147793584-f937811a-20aa-4282-baf5-035e5ddc12ea.mp4
+- **Virtual workspaces** -- macOS Spaces require Mission Control animations
+  and can't be switched programmatically without accessibility hacks. Codex
+  parks inactive windows off-screen and swaps them in instantly.
+- **Performance** -- sequential Accessibility calls made workspace switching
+  take seconds. Codex uses a native Swift shim (`winmove`) that parallelizes
+  AX calls across apps, bringing switch time down to ~150ms.
+- **App jumping** -- jump to a specific app category (browser, terminal, LLM,
+  comms) with workspace awareness. Toggle-jump flips between your last two
+  intentional targets.
+- **Scratch workspace** -- a floating (non-tiling) workspace for transient
+  windows, with Rectangle-style snap cycling.
+
+## What Codex Adds Over PaperWM.spoon
+
+| Feature | PaperWM.spoon | Codex |
+|---------|--------------|-------|
+| Virtual workspaces | -- | Off-screen parking, instant switch |
+| Scratch workspace | -- | Auto-floating, snap cycling |
+| Jump-to-app | -- | Workspace-aware, with toggle-jump |
+| Native `winmove` shim | -- | Parallel AX, animation bypass, 100ms timeout |
+| Workspace-aware dispatch | -- | Same key does different things on scratch vs tiling |
+| Per-side window gaps | -- | `{top=8, bottom=8, left=8, right=8}` |
+
+Everything from PaperWM.spoon still works: horizontal tiling, scrolling,
+slurp/barf, column stacking, swipe gestures, mouse dragging.
 
 ## Installation
 
-1. Clone to Hammerspoon Spoons directory: `git clone
-https://github.com/mogenson/PaperWM.spoon ~/.hammerspoon/Spoons/PaperWM.spoon`.
+1. Clone into your Hammerspoon Spoons directory:
 
-2. Open `System Preferences` -> `Desktop and Dock`. Scroll to the bottom to
-"Mission Control", then uncheck "Automatically rearrange Spaces based on most
-recent use" and check "Displays have separate Spaces".
-
-<img width="780" src="https://github.com/user-attachments/assets/b0842c44-2a3b-43fc-85eb-66729cd7f8db">
-
-### Install with [SpoonInstall](https://www.hammerspoon.org/Spoons/SpoonInstall.html)
-
-```lua
-hs.loadSpoon("SpoonInstall")
-
-spoon.SpoonInstall.repos.PaperWM = {
-    url = "https://github.com/mogenson/PaperWM.spoon",
-    desc = "PaperWM.spoon repository",
-    branch = "release",
-}
-
-spoon.SpoonInstall:andUse("PaperWM", {
-    repo = "PaperWM",
-    config = { screen_margin = 16, window_gap = 2 },
-    start = true,
-    hotkeys = {
-        < see below >
-    }
-})
+```bash
+git clone https://github.com/jkp/Codex.spoon ~/.hammerspoon/Spoons/Codex.spoon
 ```
 
-## Usage
+2. Open **System Settings > Desktop & Dock**, scroll to "Mission Control":
+   - Uncheck "Automatically rearrange Spaces based on most recent use"
+   - Check "Displays have separate Spaces"
 
-Add the following to your `~/.hammerspoon/init.lua`:
+The `winmove` binary is auto-built from `winmove.swift` on first load (requires
+Xcode Command Line Tools).
+
+## Quick Start
+
+Minimal `~/.hammerspoon/init.lua`:
 
 ```lua
-PaperWM = hs.loadSpoon("PaperWM")
-PaperWM:bindHotkeys({
-    -- switch to a new focused window in tiled grid
+Codex = hs.loadSpoon("Codex")
+Codex.window_gap = 10
+Codex:start()
+
+Codex:bindHotkeys({
     focus_left  = {{"alt", "cmd"}, "left"},
     focus_right = {{"alt", "cmd"}, "right"},
     focus_up    = {{"alt", "cmd"}, "up"},
     focus_down  = {{"alt", "cmd"}, "down"},
-
-    -- switch windows by cycling forward/backward
-    -- (forward = down or right, backward = up or left)
-    focus_prev = {{"alt", "cmd"}, "k"},
-    focus_next = {{"alt", "cmd"}, "j"},
-
-    -- move windows around in tiled grid
-    swap_left  = {{"alt", "cmd", "shift"}, "left"},
-    swap_right = {{"alt", "cmd", "shift"}, "right"},
-    swap_up    = {{"alt", "cmd", "shift"}, "up"},
-    swap_down  = {{"alt", "cmd", "shift"}, "down"},
-
-    -- position and resize focused window
-    center_window        = {{"alt", "cmd"}, "c"},
-    full_width           = {{"alt", "cmd"}, "f"},
-    cycle_width          = {{"alt", "cmd"}, "r"},
-    reverse_cycle_width  = {{"ctrl", "alt", "cmd"}, "r"},
-    cycle_height         = {{"alt", "cmd", "shift"}, "r"},
-    reverse_cycle_height = {{"ctrl", "alt", "cmd", "shift"}, "r"},
-
-    -- increase/decrease width
-    increase_width = {{"alt", "cmd"}, "l"},
-    decrease_width = {{"alt", "cmd"}, "h"},
-
-    -- move focused window into / out of a column
-    slurp_in = {{"alt", "cmd"}, "i"},
-    barf_out = {{"alt", "cmd"}, "o"},
-
-    -- move the focused window into / out of the tiling layer
+    swap_left   = {{"alt", "cmd", "shift"}, "left"},
+    swap_right  = {{"alt", "cmd", "shift"}, "right"},
+    swap_up     = {{"alt", "cmd", "shift"}, "up"},
+    swap_down   = {{"alt", "cmd", "shift"}, "down"},
+    center_window   = {{"alt", "cmd"}, "c"},
+    full_width      = {{"alt", "cmd"}, "f"},
+    cycle_width     = {{"alt", "cmd"}, "r"},
     toggle_floating = {{"alt", "cmd", "shift"}, "escape"},
-    -- raise all floating windows on top of tiled windows
-    focus_floating  = {{"alt", "cmd", "shift"}, "f"},
-
-    -- focus the first / second / etc window in the current space
-    focus_window_1 = {{"cmd", "shift"}, "1"},
-    focus_window_2 = {{"cmd", "shift"}, "2"},
-    focus_window_3 = {{"cmd", "shift"}, "3"},
-    focus_window_4 = {{"cmd", "shift"}, "4"},
-    focus_window_5 = {{"cmd", "shift"}, "5"},
-    focus_window_6 = {{"cmd", "shift"}, "6"},
-    focus_window_7 = {{"cmd", "shift"}, "7"},
-    focus_window_8 = {{"cmd", "shift"}, "8"},
-    focus_window_9 = {{"cmd", "shift"}, "9"},
-
-    -- switch to a new Mission Control space
-    switch_space_l = {{"alt", "cmd"}, ","},
-    switch_space_r = {{"alt", "cmd"}, "."},
-    switch_space_1 = {{"alt", "cmd"}, "1"},
-    switch_space_2 = {{"alt", "cmd"}, "2"},
-    switch_space_3 = {{"alt", "cmd"}, "3"},
-    switch_space_4 = {{"alt", "cmd"}, "4"},
-    switch_space_5 = {{"alt", "cmd"}, "5"},
-    switch_space_6 = {{"alt", "cmd"}, "6"},
-    switch_space_7 = {{"alt", "cmd"}, "7"},
-    switch_space_8 = {{"alt", "cmd"}, "8"},
-    switch_space_9 = {{"alt", "cmd"}, "9"},
-
-    -- move focused window to a new space and tile
-    move_window_1 = {{"alt", "cmd", "shift"}, "1"},
-    move_window_2 = {{"alt", "cmd", "shift"}, "2"},
-    move_window_3 = {{"alt", "cmd", "shift"}, "3"},
-    move_window_4 = {{"alt", "cmd", "shift"}, "4"},
-    move_window_5 = {{"alt", "cmd", "shift"}, "5"},
-    move_window_6 = {{"alt", "cmd", "shift"}, "6"},
-    move_window_7 = {{"alt", "cmd", "shift"}, "7"},
-    move_window_8 = {{"alt", "cmd", "shift"}, "8"},
-    move_window_9 = {{"alt", "cmd", "shift"}, "9"}
+    slurp_in        = {{"alt", "cmd"}, "i"},
+    barf_out        = {{"alt", "cmd"}, "o"},
 })
-PaperWM:start()
 ```
 
-Feel free to customize hotkeys or use
-`PaperWM:bindHotkeys(PaperWM.default_hotkeys)` for defaults. PaperWM actions are
-also available for manual keybinding. The `PaperWM.actions.actions()` function
-will return a table of action names and functions to call.
+`Codex:start()` begins tiling. `Codex:stop()` releases windows.
 
-For example, the following config uses a hyper key and a modal layer to navigate
-windows with the h/j/k/l keys, like vim:
+Use `Codex:bindHotkeys(Codex.default_hotkeys)` for a full set of defaults.
+
+## Configuration
+
+### Window Gaps
 
 ```lua
-PaperWM = hs.loadSpoon("PaperWM")
-PaperWM:bindHotkeys(PaperWM.default_hotkeys)
-
--- use ⌘ Enter as hyper key to enter modal layer, press Escape to exit
-local modal = hs.hotkey.modal.new({ "cmd" }, "return")
-
-local actions = PaperWM.actions.actions()
-modal:bind({}, "h", nil, actions.focus_left)
-modal:bind({}, "j", nil, actions.focus_down)
-modal:bind({}, "k", nil, actions.focus_up)
-modal:bind({}, "l", nil, actions.focus_right)
-modal:bind({}, "escape", function() modal:exit() end)
-
-PaperWM:start()
+Codex.window_gap = 10                                          -- uniform
+Codex.window_gap = {top = 10, bottom = 8, left = 12, right = 12}  -- per-side
 ```
 
-`PaperWM:start()` will begin automatically tiling new and existing windows.
-`PaperWM:stop()` will release control over windows.
+### Window Ratios
 
-Set `PaperWM.window_gap` to the number of pixels between windows and screen
-edges. This can be a single number for all sides, or a table specifying `top`,
-`bottom`, `left`, and `right` gaps individually.
+Ratios used by `cycle_width` / `cycle_height`:
 
-For example:
 ```lua
--- 10px gap on all sides
-PaperWM.window_gap = 10
--- or specific gaps per side
-PaperWM.window_gap  =  { top = 10, bottom = 8, left = 12, right = 12 }
+Codex.window_ratios = { 1/3, 1/2, 2/3 }
 ```
 
-Third-party tools like [Sketchybar](https://github.com/felixkratz/sketchybar) 
-can be used to create custom status bars and/or dock. Set `PaperWM.external_bar` 
-to the to a table specifying `top`, `bottom` in number of pixels of your bar
-and dock to ensure consistent window placement on displays with and without a "notch".
+### External Bar
 
-For example:
+Reserve space for tools like [Sketchybar](https://github.com/felixkratz/sketchybar):
 
 ```lua
--- Add 40px offset for an external status bar
-PaperWM.external_bar = {top = 40}
--- or, add 20px offset for an external status bar and 40px offset for an external dock
-PaperWM.external_bar = {top = 20, bottom = 40}
+Codex.external_bar = {top = 40}
+Codex.external_bar = {top = 20, bottom = 40}
 ```
 
-Configure the `PaperWM.window_filter` to set which apps and screens are managed.
-For example:
+### Window Filter
+
+Control which apps and screens are managed:
 
 ```lua
--- ignore a specific app
-PaperWM.window_filter:rejectApp("iStat Menus Status")
--- ignore a specific window of an app
-PaperWM.window_filter:setAppFilter("iTunes", { rejectTitles = "MiniPlayer" })
--- list of screens to tile (use % to escape string match characters, like -)
-PaperWM.window_filter:setScreens({ "Built%-in Retina Display" })
--- restart for new window filter to take effect
-PaperWM:start()
-```
-
-Set `PaperWM.center_mouse` to control whether the mouse cursor is centered on
-the screen after switching spaces. Default is `true`. Example:
-
-```lua
--- disable mouse centering when switching spaces
-PaperWM.center_mouse = false
-```
-
-Set `PaperWM.window_ratios` to the ratios to cycle window widths and heights
-through. For example:
-
-```lua
-PaperWM.window_ratios = { 1/3, 1/2, 2/3 }
+Codex.window_filter:rejectApp("iStat Menus Status")
+Codex.window_filter:setAppFilter("iTunes", { rejectTitles = "MiniPlayer" })
+Codex.window_filter:setScreens({ "Built%-in Retina Display" })
+Codex:start()  -- restart for filter changes
 ```
 
 ### Smooth Scrolling
 
-https://github.com/user-attachments/assets/6f1c4659-0ca8-4ba1-a181-8c1c6987e8ef
-
-PaperWM.spoon can scroll windows left or right by swiping fingers horizontally
-across the trackpad. Set the number of fingers (eg. 2, 3, or 4) and, optionally,
-a gain to adjust the sensitivity:
+Swipe fingers horizontally on the trackpad to scroll windows:
 
 ```lua
--- number of fingers to detect a horizontal swipe, set to 0 to disable (the default)
-PaperWM.swipe_fingers = 0
-
--- increase this number to make windows move farther when swiping
-PaperWM.swipe_gain = 1.0
+Codex.swipe_fingers = 3  -- 0 to disable (default)
+Codex.swipe_gain = 1.0
 ```
-
-Inspired by [ScrollDesktop.spoon](https://github.com/jocap/ScrollDesktop.spoon)
 
 ### Mouse Dragging
 
-https://github.com/user-attachments/assets/61a0afda-93e6-41b3-963c-7681a4bbe7c7
-
-Click and drag a window with the mouse while holding the `PaperWM.drag_window`
-hotkey to slide and reposition all the windows on a space.
-
-Click on a window with the `PaperWM.lift_window` hotkey held to lift it up, drag
-to move the window, and release the mouse to drop it in a new tiled location.
-This is useful for moving a window to a new screen.
-
 ```lua
--- set to a table of modifier keys to enable window dragging, default is nil
-PaperWM.drag_window = { "alt", "cmd" }`
-
--- set to a table of modifier keys to enable window lifting, default is nil
-PaperWM.lift_window = { "alt", "cmd", "shift" }
+Codex.drag_window = { "alt", "cmd" }         -- drag to reorder
+Codex.lift_window = { "alt", "cmd", "shift" } -- lift out, drop to re-tile
 ```
 
 ### Mouse Scrolling
 
-Spin the mouse scroll wheel while holding the `PaperWM.scroll_window` hotkey to
-slide all windows on a space left or right. Release the hotkey to stop. Change
-`PaperWM.scroll_gain` to a positive or negative number to adjust the direction
-and sensitivity.
+```lua
+Codex.scroll_window = { "alt", "cmd" }
+Codex.scroll_gain = 10.0
+```
+
+### Misc
 
 ```lua
--- set to a table of modifier keys to enable window scroling, default is nil
-PaperWM.scroll_window = { "alt", "cmd" }`
-
--- increase move windows further when scrolling, invert to change direction
-PaperWM.scroll_gain = 10.0
+Codex.center_mouse = false  -- don't center cursor on space switch (default: true)
 ```
+
+## Workspaces
+
+Workspaces are configured via `Codex.workspaces.setup()` after `Codex:start()`:
+
+```lua
+Codex.workspaces.setup({
+    workspaces = {"personal", "work", "global", "scratch"},
+
+    -- Assign apps to workspaces (unmatched apps go to the active workspace)
+    appRules = {
+        Safari   = "personal",
+        Claude   = "personal",
+        ["Google Chrome"] = "work",
+        Spotify  = "global",
+    },
+
+    -- Jump targets: category -> { workspace -> appName }
+    jumpTargets = {
+        browser  = { personal = "Safari",  work = "Google Chrome" },
+        terminal = { personal = "WezTerm", work = "WezTerm" },
+    },
+})
+```
+
+### Scratch Workspace
+
+Set up a floating workspace where windows are never tiled:
+
+```lua
+Codex.scratch.setup("scratch")
+```
+
+Windows moved to scratch are auto-floated. Windows moved off scratch are
+re-tiled. Scratch provides Rectangle-style snap cycling (`snap("left")` etc.)
+and centered size cycling.
+
+### Workspace API
+
+```lua
+Codex.workspaces.switchTo("work")           -- switch workspace
+Codex.workspaces.moveWindowTo("personal")   -- move focused window
+Codex.workspaces.jumpToApp("browser")       -- jump to app category
+Codex.workspaces.toggleJump()               -- flip between last two targets
+Codex.workspaces.toggleScratch()            -- toggle scratch workspace
+Codex.workspaces.currentSpace()             -- get current workspace name
+Codex.workspaces.dump()                     -- debug print all state
+```
+
+### Workspace-Aware Dispatch
+
+Use `Codex:dispatch()` to bind the same key to different actions depending on
+whether you're on a tiling or scratch workspace:
+
+```lua
+local scratch = Codex.scratch
+local actions = Codex.actions.actions()
+
+hs.hotkey.bind(meh, "m", Codex:dispatch(
+    function() scratch.focus("left") end,  -- scratch action
+    actions.focus_left                      -- tiling action
+))
+```
+
+## Keybindings
+
+Codex provides two binding mechanisms:
+
+**1. `Codex:bindHotkeys(mapping)`** for tiling actions (focus, swap, resize,
+slurp/barf, space switching). See `Codex.default_hotkeys` or
+`Codex.actions.actions()` for the full list.
+
+**2. Direct `hs.hotkey.bind()`** for workspace and scratch actions, since these
+live outside the standard Spoon action table.
+
+Example with workspace bindings:
+
+```lua
+local meh = {"ctrl", "alt", "shift"}
+local hyper = {"ctrl", "alt", "shift", "cmd"}
+
+-- Workspace switch
+hs.hotkey.bind(meh, "1", function() Codex.workspaces.switchTo("personal") end)
+hs.hotkey.bind(meh, "2", function() Codex.workspaces.switchTo("work") end)
+
+-- Move window to workspace
+hs.hotkey.bind(hyper, "1", function() Codex.workspaces.moveWindowTo("personal") end)
+hs.hotkey.bind(hyper, "2", function() Codex.workspaces.moveWindowTo("work") end)
+
+-- Jump to app
+hs.hotkey.bind(meh, "b", function() Codex.workspaces.jumpToApp("browser") end)
+hs.hotkey.bind(meh, "t", function() Codex.workspaces.jumpToApp("terminal") end)
+```
+
+### Available Tiling Actions
+
+| Action | Description |
+|--------|-------------|
+| `focus_{left,right,up,down}` | Move focus directionally |
+| `focus_{prev,next}` | Cycle focus forward/backward |
+| `swap_{left,right,up,down}` | Swap window position |
+| `center_window` | Center focused window on screen |
+| `full_width` | Toggle full screen width |
+| `cycle_width` / `cycle_height` | Cycle through `window_ratios` |
+| `reverse_cycle_width` / `reverse_cycle_height` | Cycle in reverse |
+| `increase_width` / `decrease_width` | Resize by 10% |
+| `increase_height` / `decrease_height` | Resize by 10% |
+| `slurp_in` | Pull focused window into left column |
+| `barf_out` | Push focused window to new right column |
+| `toggle_floating` | Float/unfloat focused window |
+| `focus_floating` | Raise all floating windows |
+| `switch_space_{l,r,1-9}` | Switch Mission Control space |
+| `move_window_{1-9}` | Move window to Mission Control space |
+| `focus_window_{1-9}` | Focus Nth window on screen |
+
+## Architecture
+
+```
+init.lua          Entry point, loads modules, wires them together
+state.lua         Window list, index table, x positions, snapshot/restore
+windows.lua       Add/remove/focus/swap/resize windows
+tiling.lua        Column-based tiling algorithm
+events.lua        Window filter subscriptions, swipe/mouse/scroll handlers
+actions.lua       Hotkey action table
+floating.lua      Float/unfloat, persistence via hs.settings
+space.lua         Mission Control space switching
+mission_control.lua  AX-based space/window manipulation
+workspaces.lua    Virtual workspaces, off-screen parking, jump-to-app
+scratch.lua       Floating workspace with snap cycling
+config.lua        Default configuration values
+winmove.swift     Native Swift binary for parallel AX window operations
+```
+
+### The `winmove` Shim
+
+`winmove` is a Swift binary that moves/resizes windows via the Accessibility
+API. It groups operations by PID and dispatches them on concurrent threads,
+which amortizes AX round-trip latency across apps. Key optimizations:
+
+- Disables `AXEnhancedUserInterface` per-app to suppress animations
+- Sets size-position-size (workaround for macOS edge clamping bugs)
+- 100ms AX timeout per app -- skips hung apps gracefully
+- `read_only` mode reads frames in parallel without moving
+- `save=true` saves current frame before parking
 
 ## Limitations
 
-MacOS does not allow a window to be moved fully off-screen. Windows that would
-be tiled off-screen are placed in a margin on the left and right edge of the
-screen. They are still visible and clickable.
-
-It's difficult to detect when a window is dragged from one space or screen to
-another. Use the `move_window_N` commands to move windows between spaces and
-screens.
-
-Arrange screens vertically to prevent windows from bleeding into other screens.
-Use [WarpMouse.spoon](https://github.com/mogenson/WarpMouse.spoon) to simulate
-side-by-side screens.
-
-<img width="780" src="https://user-images.githubusercontent.com/900731/148595785-546f9086-9add-4731-8477-233b202378f4.png">
-
-## Add-ons
-
-The following spoons compliment PaperWM.spoon nicely.
-
-- [ActiveSpace.spoon](https://github.com/mogenson/ActiveSpace.spoon) Show active
-and layout of Mission Control spaces in the menu bar.
-- [WarpMouse.spoon](https://github.com/mogenson/WarpMouse.spoon) Move mouse
-cursor between screen edges to simulate side-by-side screens.
-- [Swipe.spoon](https://github.com/mogenson/Swipe.spoon) Perform actions when
-trackpad swipe gestures are recognized. Here's an example config to change
-PaperWM.spoon focused window:
-```lua
--- focus adjacent window with 3 finger swipe
-local actions = PaperWM.actions.actions()
-local current_id, threshold
-Swipe = hs.loadSpoon("Swipe")
-Swipe:start(3, function(direction, distance, id)
-    if id == current_id then
-        if distance > threshold then
-            threshold = math.huge -- trigger once per swipe
-
-            -- use "natural" scrolling
-            if direction == "left" then
-                actions.focus_right()
-            elseif direction == "right" then
-                actions.focus_left()
-            elseif direction == "up" then
-                actions.focus_down()
-            elseif direction == "down" then
-                actions.focus_up()
-            end
-        end
-    else
-        current_id = id
-        threshold = 0.2 -- swipe distance > 20% of trackpad size
-    end
-end)
-```
-- [FocusMode.spoon](https://github.com/selimacerbas/FocusMode.spoon) Helps you
-stay in flow by dimming everything except what you’re working on.
+- macOS does not allow windows fully off-screen. Codex parks at the
+  bottom-right corner (top-left on-screen by 1px) to avoid clamping.
+- Dragging windows between spaces is unreliable. Use `moveWindowTo()`.
+- Arrange screens vertically to prevent windows bleeding across displays.
 
 ## Contributing
 
-Contributions are welcome! Here are a few preferences:
-- Global variables are `PascalCase` (eg. `PaperWM`)
-- Local variables are `snake_case` (eg. `local focused_window`)
-- Function names are `camelCase` (eg. `function windowEventHandler()`)
+Style conventions:
+- Global variables: `PascalCase` (e.g. `Codex`)
+- Local variables: `snake_case` (e.g. `local focused_window`)
+- Function names: `camelCase` (e.g. `function windowEventHandler()`)
 - Use `<const>` where possible
-- Create a local copy when deeply nested members are used often (eg. `local
-Watcher <const> = hs.uielement.watcher`)
+- Create local aliases for deeply nested members
 
-Code format checking and linting is provided by
-[lua-language-server](https://github.com/LuaLS/lua-language-server) for commits
-and pull requests. Run `lua-language-server --check .` locally before commiting.
+Linting: `lua-language-server --check .`
 
-[Busted](https://lunarmodules.github.io/busted/) is used for unit testing. Run
-`busted` from the repo root to run tests locally.
+Testing: `busted` (requires [Busted](https://lunarmodules.github.io/busted/))

@@ -14,10 +14,10 @@ State.is_floating = {} -- dictionary of boolean with window id for keys
 State.prev_focused_window = nil ---@type Window|nil
 State.pending_window = nil ---@type Window|nil
 
----initialize module with reference to PaperWM
----@param paperwm PaperWM
-function State.init(paperwm)
-    State.PaperWM = paperwm
+---initialize module with reference to Codex
+---@param codex Codex
+function State.init(codex)
+    State.codex = codex
     State.clear()
 end
 
@@ -112,8 +112,8 @@ function State.uiWatcherCreate(window)
     local id = window:id()
     ui_watchers[id] = window:newWatcher(
         function(window, event, _, self)
-            State.PaperWM.events.windowEventHandler(window, event, self)
-        end, State.PaperWM)
+            State.codex.events.windowEventHandler(window, event, self)
+        end, State.codex)
     State.uiWatcherStart(id)
 end
 
@@ -179,7 +179,7 @@ end
 
 ---pretty print the current state
 function State.dump()
-    local output = { "--- PaperWM State ---" }
+    local output = { "--- Codex State ---" }
 
     table.insert(output, "window_list:")
     for space, columns in pairs(window_list) do

@@ -18,7 +18,7 @@ local Window <const>      = hs.window
 MissionControl.name       = "MissionControl"
 MissionControl.version    = "0.1"
 MissionControl.author     = "Michael Mogenson"
-MissionControl.homepage   = "https://github.com/mogenson/PaperWM.spoon"
+MissionControl.homepage   = "https://github.com/jkp/Codex.spoon"
 MissionControl.license    = "MIT - https://opensource.org/licenses/MIT"
 
 MissionControl.log        = hs.logger.new(MissionControl.name)
@@ -303,7 +303,7 @@ function MissionControl:focusSpace(space_id, window)
         if Timer.secondsSinceEpoch() - start_time > 1 then timer:stop() end
     end, Window.animationDuration)
 
-    if MissionControl.PaperWM and MissionControl.PaperWM.center_mouse then
+    if MissionControl.codex and MissionControl.codex.center_mouse then
         Mouse.absolutePosition(screen:frame().center)
     end
 end

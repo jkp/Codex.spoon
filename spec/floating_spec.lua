@@ -7,7 +7,7 @@ package.preload["state"] = function() return dofile("state.lua") end
 package.preload["space"] = function() return dofile("space.lua") end
 package.preload["tiling"] = function() return dofile("tiling.lua") end
 
-describe("PaperWM.floating", function()
+describe("Codex.floating", function()
     local Mocks = require("mocks")
     Mocks.init_mocks()
 
@@ -19,18 +19,18 @@ describe("PaperWM.floating", function()
     local Space = require("space")
     local Tiling = require("tiling")
 
-    local mock_paperwm = Mocks.get_mock_paperwm({ Floating = Floating, Windows = Windows, State = State, Space = Space, Tiling = Tiling })
+    local mock_codex = Mocks.get_mock_codex({ Floating = Floating, Windows = Windows, State = State, Space = Space, Tiling = Tiling })
     local mock_window = Mocks.mock_window
 
     local focused_window
 
     before_each(function()
         -- Reset state before each test
-        State.init(mock_paperwm)
-        Floating.init(mock_paperwm)
-        Windows.init(mock_paperwm)
-        Space.init(mock_paperwm)
-        Tiling.init(mock_paperwm)
+        State.init(mock_codex)
+        Floating.init(mock_codex)
+        Windows.init(mock_codex)
+        Space.init(mock_codex)
+        Tiling.init(mock_codex)
         hs.window.focusedWindow = function() return focused_window end
         hs.window.visibleWindows = function() return {} end
     end)
@@ -57,7 +57,7 @@ describe("PaperWM.floating", function()
 
             local initial_frame = win:frame()
 
-            mock_paperwm:tileSpace(1)
+            mock_codex:tileSpace(1)
 
             assert.are.same(initial_frame, win:frame())
         end)

@@ -17,10 +17,10 @@ local WindowFilter <const> = hs.window.filter
 local Events = {}
 Events.__index = Events
 
----initialize module with reference to PaperWM
----@param paperwm PaperWM
-function Events.init(paperwm)
-    Events.PaperWM = paperwm
+---initialize module with reference to Codex
+---@param codex Codex
+function Events.init(codex)
+    Events.codex = codex
     Events.Swipe = dofile(hs.spoons.resourcePath("swipe.lua"))
 end
 
@@ -31,8 +31,8 @@ local screen_watcher = Screen.watcher.new((function()
         if not pending_timer then
             pending_timer = Timer.doAfter(Window.animationDuration, function()
                 pending_timer = nil
-                Events.PaperWM.logger.d("refreshing window layout on screen change")
-                Events.PaperWM.windows.refreshWindows()
+                Events.codex.logger.d("refreshing window layout on screen change")
+                Events.codex.windows.refreshWindows()
             end)
         end
     end
@@ -41,7 +41,7 @@ end)())
 ---callback for window events
 ---@param window Window
 ---@param event string name of the event
----@param self PaperWM
+---@param self Codex
 ---set to true to temporarily ignore all window events during workspace switches
 Events.paused = false
 
@@ -112,7 +112,7 @@ function Events.windowEventHandler(window, event, self)
 end
 
 ---coroutine to slide all windows in a space by dx
----@param self PaperWM
+---@param self Codex
 ---@param space Space
 ---@param screen_frame Frame
 local function slide_windows(self, space, screen_frame)
@@ -176,7 +176,7 @@ local function slide_windows(self, space, screen_frame)
 end
 
 ---generate callback function for touchpad swipe gesture event
----@param self PaperWM
+---@param self Codex
 function Events.swipeHandler(self)
     -- saved upvalues between callback function calls
     local swipe_coro, screen_frame = nil, nil
@@ -226,7 +226,7 @@ function Events.swipeHandler(self)
 end
 
 ---generate callback function for mouse events
----@param self PaperWM
+---@param self Codex
 function Events.mouseHandler(self)
     local lift_window, drag_coro = nil, nil
 
@@ -309,7 +309,7 @@ function Events.mouseHandler(self)
 end
 
 ---generate callback for scroll wheel events
----@param self PaperWM
+---@param self Codex
 function Events.scrollHandler(self)
     local flags_watcher, scroll_coro = nil, nil
 
@@ -368,38 +368,38 @@ end
 ---start monitoring for window events
 function Events.start()
     -- listen for window events
-    Events.PaperWM.window_filter:subscribe({
+    Events.codex.window_filter:subscribe({
         WindowFilter.windowFocused, WindowFilter.windowVisible,
         WindowFilter.windowNotVisible, WindowFilter.windowFullscreened,
         WindowFilter.windowUnfullscreened, WindowFilter.windowDestroyed,
-    }, function(window, _, event) Events.windowEventHandler(window, event, Events.PaperWM) end)
+    }, function(window, _, event) Events.windowEventHandler(window, event, Events.codex) end)
 
     -- watch for external monitor plug / unplug
     screen_watcher:start()
 
     -- recognize horizontal touchpad swipe gestures
-    if Events.PaperWM.swipe_fingers > 1 then
-        Events.Swipe:start(Events.PaperWM.swipe_fingers, Events.swipeHandler(Events.PaperWM))
+    if Events.codex.swipe_fingers > 1 then
+        Events.Swipe:start(Events.codex.swipe_fingers, Events.swipeHandler(Events.codex))
     end
 
     -- register a mouse event watcher if the drag window or lift window hotkeys are set
-    if Events.PaperWM.drag_window or Events.PaperWM.lift_window then
+    if Events.codex.drag_window or Events.codex.lift_window then
         Events.mouse_watcher = hs.eventtap.new({ LeftMouseDown, LeftMouseDragged, LeftMouseUp },
-            Events.mouseHandler(Events.PaperWM)):start()
+            Events.mouseHandler(Events.codex)):start()
     end
 
     -- register a scroll wheel watcher if the scroll_window hotkey is set
-    if Events.PaperWM.scroll_window then
+    if Events.codex.scroll_window then
         Events.scroll_watcher = hs.eventtap.new({ ScrollWheel },
-            Events.scrollHandler(Events.PaperWM)):start()
+            Events.scrollHandler(Events.codex)):start()
     end
 end
 
 ---stop monitoring for window events
 function Events.stop()
     -- stop events
-    Events.PaperWM.window_filter:unsubscribeAll()
-    Events.PaperWM.state.uiWatcherStopAll()
+    Events.codex.window_filter:unsubscribeAll()
+    Events.codex.state.uiWatcherStopAll()
     screen_watcher:stop()
 
     -- stop listening for touchpad swipes
