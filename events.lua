@@ -42,11 +42,16 @@ end)())
 ---@param window Window
 ---@param event string name of the event
 ---@param self PaperWM
+---set to true to temporarily ignore all window events during workspace switches
+Events.paused = false
+
 function Events.windowEventHandler(window, event, self)
+    if Events.paused then return end
     if not window["id"] then
         self.logger.ef("no id method for window %s in windowEventHandler", window)
         return
     end
+    if self.state.isHidden(window:id()) then return end
 
     self.logger.df("%s for [%s]: %d", event, window:title(), window:id())
     local space = nil

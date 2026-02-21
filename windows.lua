@@ -108,6 +108,7 @@ function Windows.refreshWindows()
 
     local retile_spaces = {} -- spaces that need to be retiled
     for _, window in ipairs(all_windows) do
+        if Windows.PaperWM.state.isHidden(window:id()) then goto continue end
         local index = Windows.PaperWM.state.windowIndex(window)
         if Windows.PaperWM.floating.isFloating(window) then
             -- ignore floating windows
@@ -121,6 +122,7 @@ function Windows.refreshWindows()
             local space = Windows.addWindow(window)
             if space then retile_spaces[space] = true end
         end
+        ::continue::
     end
 
     -- retile spaces
@@ -131,6 +133,9 @@ end
 ---@param add_window Window new window to be added
 ---@return Space|nil space that contains new window
 function Windows.addWindow(add_window)
+    -- don't add windows that are parked by virtual workspaces
+    if add_window:id() and Windows.PaperWM.state.isHidden(add_window:id()) then return end
+
     -- A window with no tabs will have a tabCount of 0 or 1
     -- A new tab for a window will have tabCount equal to the total number of tabs
     -- All existing tabs in a window will have their tabCount reset to 0
@@ -694,6 +699,9 @@ function Windows.moveWindow(window, frame)
     -- greater than 0.017 hs.window animation step time
     local padding <const> = 0.02
     local id = window:id()
+
+    -- don't reposition windows parked by virtual workspaces
+    if id and Windows.PaperWM.state.isHidden(id) then return end
 
     if frame == window:frame() then
         Windows.PaperWM.logger.v("no change in window frame")

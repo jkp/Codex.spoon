@@ -8,6 +8,7 @@ local window_list = {} -- 3D array of tiles in order of [space][x][y]
 local index_table = {} -- dictionary of {space, x, y} with window id for keys
 local ui_watchers = {} -- dictionary of uielement watchers with window id for keys
 local x_positions = {} -- dictionary of horizontal positions with [space][id] for keys
+local hidden_ids = {}  -- set of window ids parked off-screen by virtual workspaces
 ---public state
 State.is_floating = {} -- dictionary of boolean with window id for keys
 State.prev_focused_window = nil ---@type Window|nil
@@ -26,6 +27,7 @@ function State.clear()
     index_table = {}
     ui_watchers = {}
     x_positions = {}
+    hidden_ids = {}
     State.is_floating = {}
     State.prev_focused_window = nil
     State.pending_window = nil
@@ -227,6 +229,101 @@ function State.dump()
 
     table.insert(output, "---------------------")
     print(table.concat(output, "\n"))
+end
+
+-- Virtual workspace support: hidden window tracking
+
+---mark or unmark a window as hidden (parked off-screen)
+---@param id number Window ID
+---@param val boolean|nil true to hide, nil/false to unhide
+function State.setHidden(id, val)
+    hidden_ids[id] = val or nil
+end
+
+---check if a window is hidden
+---@param id number Window ID
+---@return boolean
+function State.isHidden(id)
+    return hidden_ids[id] ~= nil
+end
+
+-- Virtual workspace support: snapshot and restore tiling state per space
+
+---deep-copy window_list and x_positions for a given space
+---@param space Space
+---@return table snapshot
+function State.snapshotSpace(space)
+    local wl = nil
+    if window_list[space] then
+        wl = {}
+        for col, rows in ipairs(window_list[space]) do
+            wl[col] = {}
+            for row, win in ipairs(rows) do
+                wl[col][row] = win
+            end
+        end
+    end
+    local xp = nil
+    if x_positions[space] then
+        xp = {}
+        for id, x in pairs(x_positions[space]) do
+            xp[id] = x
+        end
+    end
+    return { window_list = wl, x_positions = xp }
+end
+
+---restore a previously saved snapshot for a space
+---@param space Space
+---@param snapshot table|nil saved snapshot, or nil to clear
+function State.restoreSpace(space, snapshot)
+    -- clear index entries for windows currently in this space
+    if window_list[space] then
+        for _, rows in ipairs(window_list[space]) do
+            for _, win in ipairs(rows) do
+                index_table[win:id()] = nil
+            end
+        end
+    end
+    if snapshot and snapshot.window_list then
+        window_list[space] = snapshot.window_list
+        x_positions[space] = snapshot.x_positions
+        update_index(space)
+    else
+        window_list[space] = nil
+        x_positions[space] = nil
+    end
+end
+
+---return set of window IDs currently tiled in a space
+---@param space Space
+---@return table<number, boolean>
+function State.windowIdsInSpace(space)
+    local ids = {}
+    if window_list[space] then
+        for _, rows in ipairs(window_list[space]) do
+            for _, win in ipairs(rows) do
+                ids[win:id()] = true
+            end
+        end
+    end
+    return ids
+end
+
+---ensure UI watchers exist and are started for all windows in a space
+---@param space Space
+function State.ensureWatchers(space)
+    if not window_list[space] then return end
+    for _, rows in ipairs(window_list[space]) do
+        for _, win in ipairs(rows) do
+            local id = win:id()
+            if not ui_watchers[id] then
+                State.uiWatcherCreate(win)
+            else
+                State.uiWatcherStart(id)
+            end
+        end
+    end
 end
 
 return State
