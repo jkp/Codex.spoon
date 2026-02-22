@@ -39,6 +39,11 @@ describe("Codex.workspaces", function()
                 windowEventHandler = function() end,
                 paused = false,
             },
+            transport = {
+                moveWindows = function(ops) end,
+                moveWindowsAsync = function(ops) end,
+                readFrames = function(entries) return {} end,
+            },
             window_filter = {
                 getWindows = function() return all_filter_windows end,
             },
@@ -46,6 +51,7 @@ describe("Codex.workspaces", function()
                 d = function(...) end,
                 e = function(...) end,
                 v = function(...) end,
+                i = function(...) end,
                 df = function(...) end,
                 vf = function(...) end,
                 ef = function(...) end,

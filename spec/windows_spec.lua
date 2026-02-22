@@ -30,7 +30,7 @@ describe("Codex.windows", function()
             local win = mock_window(101, "Test Window")
             local space = Windows.addWindow(win)
 
-            local state = Windows.codex.state.get()
+            local state = State.get()
             assert.are.equal(1, space)
             assert.are.equal(1, #state.window_list[space])
             assert.are.equal(1, #state.window_list[space][1])
@@ -48,7 +48,7 @@ describe("Codex.windows", function()
 
             local space = Windows.addWindow(win)
 
-            local state = Windows.codex.state.get()
+            local state = State.get()
             assert.is_nil(space)
             assert.is_nil(state.index_table[101])
             assert.is_nil(state.ui_watchers[101])
@@ -61,7 +61,7 @@ describe("Codex.windows", function()
 
             local space = Windows.addWindow(win)
 
-            local state = Windows.codex.state.get()
+            local state = State.get()
             assert.are.equal(1, space)
             assert.are.equal(1, #state.window_list[space])
             assert.are.equal(1, #state.window_list[space][1])
@@ -79,7 +79,7 @@ describe("Codex.windows", function()
 
             local space = Windows.addWindow(win)
 
-            local state = Windows.codex.state.get()
+            local state = State.get()
             assert.are.equal(1, space)
             assert.are.equal(1, #state.window_list[space])
             assert.are.equal(1, #state.window_list[space][1])
@@ -97,7 +97,7 @@ describe("Codex.windows", function()
 
             local space = Windows.addWindow(win)
 
-            local state = Windows.codex.state.get()
+            local state = State.get()
             assert.are.equal(1, space)
             assert.are.equal(1, #state.window_list[space])
             assert.are.equal(1, #state.window_list[space][1])
@@ -117,7 +117,7 @@ describe("Codex.windows", function()
             Windows.addWindow(win1)
             Windows.addWindow(win2)
 
-            local state = Windows.codex.state.get()
+            local state = State.get()
             assert.are.equal(win1, state.window_list[1][1][1])
             assert.are.equal(win2, state.window_list[1][2][1])
         end)
@@ -130,7 +130,7 @@ describe("Codex.windows", function()
 
             local space = Windows.removeWindow(win, true)
 
-            local state = Windows.codex.state.get()
+            local state = State.get()
             assert.are.equal(1, space)
             assert.is_nil(state.window_list[space])
             assert.is_nil(state.index_table[101])
@@ -148,7 +148,7 @@ describe("Codex.windows", function()
 
             Windows.swapWindows(Windows.Direction.RIGHT)
 
-            local state = Windows.codex.state.get()
+            local state = State.get()
             assert.are.equal(win2, state.window_list[1][1][1])
             assert.are.equal(win1, state.window_list[1][2][1])
         end)
@@ -163,7 +163,7 @@ describe("Codex.windows", function()
 
             Windows.swapWindows(Windows.Direction.DOWN)
 
-            local state = Windows.codex.state.get()
+            local state = State.get()
             assert.are.equal(win2, state.window_list[1][1][1])
             assert.are.equal(win1, state.window_list[1][1][2])
         end)
@@ -179,7 +179,7 @@ describe("Codex.windows", function()
 
             Windows.slurpWindow()
 
-            local state = Windows.codex.state.get()
+            local state = State.get()
             assert.are.equal(1, #state.window_list[1])    -- only one column left
             assert.are.equal(2, #state.window_list[1][1]) -- with two windows
             assert.are.equal(win1, state.window_list[1][1][1])
@@ -197,7 +197,7 @@ describe("Codex.windows", function()
 
             Windows.barfWindow()
 
-            local state = Windows.codex.state.get()
+            local state = State.get()
             assert.are.equal(2, #state.window_list[1])    -- two columns
             assert.are.equal(1, #state.window_list[1][1]) -- one window in first column
             assert.are.equal(1, #state.window_list[1][2]) -- one window in second column

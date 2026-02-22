@@ -17,10 +17,13 @@ local WindowFilter <const> = hs.window.filter
 local Events = {}
 Events.__index = Events
 
+-- Spoon reference (set by init)
+local codex = nil
+
 ---initialize module with reference to Codex
----@param codex Codex
-function Events.init(codex)
-    Events.codex = codex
+---@param spoon Codex
+function Events.init(spoon)
+    codex = spoon
     Events.Swipe = dofile(hs.spoons.resourcePath("swipe.lua"))
 end
 
@@ -31,8 +34,8 @@ local screen_watcher = Screen.watcher.new((function()
         if not pending_timer then
             pending_timer = Timer.doAfter(Window.animationDuration, function()
                 pending_timer = nil
-                Events.codex.logger.d("refreshing window layout on screen change")
-                Events.codex.windows.refreshWindows()
+                codex.logger.d("refreshing window layout on screen change")
+                codex.windows.refreshWindows()
             end)
         end
     end
@@ -369,38 +372,38 @@ end
 ---start monitoring for window events
 function Events.start()
     -- listen for window events
-    Events.codex.window_filter:subscribe({
+    codex.window_filter:subscribe({
         WindowFilter.windowFocused, WindowFilter.windowVisible,
         WindowFilter.windowNotVisible, WindowFilter.windowFullscreened,
         WindowFilter.windowUnfullscreened, WindowFilter.windowDestroyed,
-    }, function(window, _, event) Events.windowEventHandler(window, event, Events.codex) end)
+    }, function(window, _, event) Events.windowEventHandler(window, event, codex) end)
 
     -- watch for external monitor plug / unplug
     screen_watcher:start()
 
     -- recognize horizontal touchpad swipe gestures
-    if Events.codex.swipe_fingers > 1 then
-        Events.Swipe:start(Events.codex.swipe_fingers, Events.swipeHandler(Events.codex))
+    if codex.swipe_fingers > 1 then
+        Events.Swipe:start(codex.swipe_fingers, Events.swipeHandler(codex))
     end
 
     -- register a mouse event watcher if the drag window or lift window hotkeys are set
-    if Events.codex.drag_window or Events.codex.lift_window then
+    if codex.drag_window or codex.lift_window then
         Events.mouse_watcher = hs.eventtap.new({ LeftMouseDown, LeftMouseDragged, LeftMouseUp },
-            Events.mouseHandler(Events.codex)):start()
+            Events.mouseHandler(codex)):start()
     end
 
     -- register a scroll wheel watcher if the scroll_window hotkey is set
-    if Events.codex.scroll_window then
+    if codex.scroll_window then
         Events.scroll_watcher = hs.eventtap.new({ ScrollWheel },
-            Events.scrollHandler(Events.codex)):start()
+            Events.scrollHandler(codex)):start()
     end
 end
 
 ---stop monitoring for window events
 function Events.stop()
     -- stop events
-    Events.codex.window_filter:unsubscribeAll()
-    Events.codex.state.uiWatcherStopAll()
+    codex.window_filter:unsubscribeAll()
+    codex.state.uiWatcherStopAll()
     screen_watcher:stop()
 
     -- stop listening for touchpad swipes

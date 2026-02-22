@@ -3,6 +3,9 @@ local Watcher <const> = hs.uielement.watcher
 local State = {}
 State.__index = State
 
+-- Spoon reference (set by init)
+local codex = nil
+
 ---private state
 local window_list = {} -- 3D array of tiles in order of [space][x][y]
 local index_table = {} -- dictionary of {space, x, y} with window id for keys
@@ -12,12 +15,13 @@ local hidden_ids = {}  -- set of window ids parked off-screen by virtual workspa
 ---public state
 State.is_floating = {} -- dictionary of boolean with window id for keys
 State.prev_focused_window = nil ---@type Window|nil
+State.prev_prev_focused_window = nil ---@type Window|nil
 State.pending_window = nil ---@type Window|nil
 
 ---initialize module with reference to Codex
----@param codex Codex
-function State.init(codex)
-    State.codex = codex
+---@param spoon Codex
+function State.init(spoon)
+    codex = spoon
     State.clear()
 end
 
@@ -30,6 +34,7 @@ function State.clear()
     hidden_ids = {}
     State.is_floating = {}
     State.prev_focused_window = nil
+    State.prev_prev_focused_window = nil
     State.pending_window = nil
 end
 
@@ -112,8 +117,8 @@ function State.uiWatcherCreate(window)
     local id = window:id()
     ui_watchers[id] = window:newWatcher(
         function(window, event, _, self)
-            State.codex.events.windowEventHandler(window, event, self)
-        end, State.codex)
+            codex.events.windowEventHandler(window, event, self)
+        end, codex)
     State.uiWatcherStart(id)
 end
 
@@ -228,7 +233,7 @@ function State.dump()
     end
 
     table.insert(output, "---------------------")
-    print(table.concat(output, "\n"))
+    codex.logger.i(table.concat(output, "\n"))
 end
 
 -- Virtual workspace support: hidden window tracking

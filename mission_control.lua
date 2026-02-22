@@ -3,6 +3,9 @@
 local MissionControl      = {}
 MissionControl.__index    = MissionControl
 
+-- Spoon reference (set by init)
+local codex = nil
+
 local Application <const> = hs.application
 local Axuielement <const> = hs.axuielement
 local Event <const>       = hs.eventtap.event
@@ -22,6 +25,12 @@ MissionControl.homepage   = "https://github.com/jkp/Codex.spoon"
 MissionControl.license    = "MIT - https://opensource.org/licenses/MIT"
 
 MissionControl.log        = hs.logger.new(MissionControl.name)
+
+---initialize module with reference to Codex
+---@param spoon Codex
+function MissionControl.init(spoon)
+    codex = spoon
+end
 
 ---blocking wait
 ---@param seconds number
@@ -303,7 +312,7 @@ function MissionControl:focusSpace(space_id, window)
         if Timer.secondsSinceEpoch() - start_time > 1 then timer:stop() end
     end, Window.animationDuration)
 
-    if MissionControl.codex and MissionControl.codex.center_mouse then
+    if codex and codex.center_mouse then
         Mouse.absolutePosition(screen:frame().center)
     end
 end

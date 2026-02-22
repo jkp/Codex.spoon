@@ -100,12 +100,18 @@ function M.get_mock_codex(modules)
             windowEventHandler = function() end,
             paused = false,
         },
+        transport = {
+            moveWindows = function(ops) end,
+            moveWindowsAsync = function(ops) end,
+            readFrames = function(entries) return {} end,
+        },
         window_filter = {
             getWindows = function() return {} end,
         },
         logger = {
             d = function(...) end,
             e = function(...) end,
+            i = function(...) end,
             v = function(...) end,
             df = function(...) end,
             vf = function(...) end,
@@ -249,6 +255,7 @@ function M.init_mocks(modules)
                 return {
                     d = function(...) end,
                     e = function(...) end,
+                    i = function(...) end,
                     v = function(...) end,
                     df = function(...) end,
                     vf = function(...) end,
