@@ -88,4 +88,10 @@ Config.scroll_gain = 10 ---@type number
 ---center mouse cursor on screen after switching spaces
 Config.center_mouse = true ---@type boolean
 
+---keep left neighbor visible when focusing a non-first column (split-screen pairing)
+Config.sticky_pairs = true ---@type boolean
+
+---right-anchor the last column to eliminate dead space at the right edge
+Config.right_anchor_last = false ---@type boolean
+
 return Config

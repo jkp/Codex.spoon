@@ -107,14 +107,49 @@ function Tiling.tileSpace(space)
     local right_margin <const> = screen_frame.x2 - Tiling.codex.screen_margin
     local canvas <const> = Tiling.codex.windows.getCanvas(screen)
 
-    -- make sure anchor window is on screen
+    -- position anchor window on screen
     local anchor_frame = anchor_window:frame()
-    anchor_frame.x = math.max(anchor_frame.x, canvas.x)
     anchor_frame.w = math.min(anchor_frame.w, canvas.w)
     anchor_frame.h = math.min(anchor_frame.h, canvas.h)
-    if anchor_frame.x2 > canvas.x2 then
+
+    local columns = Tiling.codex.state.windowList(space)
+    local num_cols = #columns
+
+    if Tiling.codex.right_anchor_last and anchor_index.col == num_cols and num_cols > 1 then
+        -- Last column: right-anchor
         anchor_frame.x = canvas.x2 - anchor_frame.w
+    elseif anchor_index.col > 1 and Tiling.codex.sticky_pairs then
+        -- Determine if anchor was left-anchored: check scroll direction first,
+        -- then fall back to saved x_position (survives workspace switches)
+        local prev = Tiling.codex.state.prev_prev_focused_window
+        local prev_index = prev and Tiling.codex.state.windowIndex(prev)
+        local scrolled_left = prev_index
+            and prev_index.space == anchor_index.space
+            and prev_index.col > anchor_index.col
+        if not scrolled_left and not prev_index then
+            local saved_x = Tiling.codex.state.xPositions(space)[anchor_window:id()]
+            scrolled_left = saved_x and saved_x == canvas.x
+        end
+
+        if scrolled_left then
+            -- Scrolled left: left-anchor to maintain continuity with right neighbor
+            anchor_frame.x = canvas.x
+        else
+            -- Default/scrolled right: shift right to show left neighbor
+            local left_col = columns[anchor_index.col - 1]
+            local left_w = left_col[1]:frame().w
+            local left_gap = Tiling.codex.windows.getGap("left")
+            if left_w + left_gap + anchor_frame.w <= canvas.w then
+                anchor_frame.x = canvas.x + left_w + left_gap
+            else
+                anchor_frame.x = canvas.x
+            end
+        end
+    else
+        -- First column or only column: left-anchor
+        anchor_frame.x = canvas.x
     end
+    anchor_frame.x2 = anchor_frame.x + anchor_frame.w
 
     -- adjust anchor window column
     local column = Tiling.codex.state.windowList(space, anchor_index.col)
