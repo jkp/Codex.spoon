@@ -371,15 +371,21 @@ end
 
 ---start monitoring for window events
 function Events.start()
+    local function _ms(t) return math.floor((hs.timer.absoluteTime() - t) / 1e6) end
+
     -- listen for window events
+    local _t = hs.timer.absoluteTime()
     codex.window_filter:subscribe({
         WindowFilter.windowFocused, WindowFilter.windowVisible,
         WindowFilter.windowNotVisible, WindowFilter.windowFullscreened,
         WindowFilter.windowUnfullscreened, WindowFilter.windowDestroyed,
     }, function(window, _, event) Events.windowEventHandler(window, event, codex) end)
+    print(string.format("[events.start] subscribe: %dms", _ms(_t)))
 
     -- watch for external monitor plug / unplug
+    _t = hs.timer.absoluteTime()
     screen_watcher:start()
+    print(string.format("[events.start] screen_watcher: %dms", _ms(_t)))
 
     -- recognize horizontal touchpad swipe gestures
     if codex.swipe_fingers > 1 then

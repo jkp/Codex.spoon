@@ -99,23 +99,27 @@ end
 ---start automatic window tiling
 ---@return Codex
 function Codex:start()
-    -- check for some settings
+    local function _ms(t) return math.floor((hs.timer.absoluteTime() - t) / 1e6) end
+
     if not Spaces.screensHaveSeparateSpaces() then
         self.logger.e(
             "please check 'Displays have separate Spaces' in System Preferences -> Mission Control")
     end
 
-    -- clear state
-    self.state.clear();
+    local t = hs.timer.absoluteTime()
+    self.state.clear()
+    print(string.format("[start] state.clear: %dms", _ms(t)))
 
-    -- restore floating windows
+    t = hs.timer.absoluteTime()
     self.floating.restoreFloating()
+    print(string.format("[start] restoreFloating: %dms", _ms(t)))
 
-    -- populate window list, index table, ui_watchers, and set initial layout
-    self.windows.refreshWindows()
-
-    -- start event listeners
+    -- events.start() subscribes to window filter, which fires windowVisible
+    -- for all existing windows — this populates state via addWindow().
+    -- No need for a separate refreshWindows() enumeration at startup.
+    t = hs.timer.absoluteTime()
     self.events.start()
+    print(string.format("[start] events.start: %dms", _ms(t)))
 
     return self
 end

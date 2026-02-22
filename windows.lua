@@ -106,10 +106,15 @@ end
 
 ---get all windows across all spaces and retile them
 function Windows.refreshWindows()
+    local function _ms(t) return math.floor((hs.timer.absoluteTime() - t) / 1e6) end
+
     -- get all windows across spaces
+    local _t = hs.timer.absoluteTime()
     local all_windows = codex.window_filter:getWindows()
+    print(string.format("[refreshWindows] getWindows: %dms (%d wins)", _ms(_t), #all_windows))
 
     local retile_spaces = {} -- spaces that need to be retiled
+    _t = hs.timer.absoluteTime()
     for _, window in ipairs(all_windows) do
         if codex.state.isHidden(window:id()) then goto continue end
         local index = codex.state.windowIndex(window)
@@ -127,9 +132,12 @@ function Windows.refreshWindows()
         end
         ::continue::
     end
+    print(string.format("[refreshWindows] add loop: %dms", _ms(_t)))
 
     -- retile spaces
+    _t = hs.timer.absoluteTime()
     for space, _ in pairs(retile_spaces) do codex:tileSpace(space) end
+    print(string.format("[refreshWindows] tileSpace: %dms", _ms(_t)))
 end
 
 ---add a new window to be tracked and automatically tiled
