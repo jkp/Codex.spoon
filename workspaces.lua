@@ -27,13 +27,15 @@ local current = nil      -- active workspace name
 local switching = false  -- re-entrancy guard for switchTo
 local focus_timer = nil  -- debounce timer for onWindowFocused
 local app_rules = {}     -- appName -> workspace name
+local title_rules = {}   -- ordered list of { pattern=string, workspace=string }
 local screen_changed = false  -- set by screen watcher, forces retile on next switch
 local ws_pending = {}         -- name -> { {id=number, win=window_ref}, ... }
 local screen_watcher = nil    -- hs.screen.watcher instance
 local scratch_name = nil -- name of the scratch workspace (no tiling)
 local pre_scratch = nil  -- workspace we came from before entering scratch
 local ws_filter = nil    -- separate window filter for workspace lifecycle hooks
-local jump_targets = {}  -- category -> { workspace -> appName }
+local jump_targets = {}  -- category -> { workspace -> appName | {app,title,launch} }
+local jump_window = {}   -- "category:workspace" -> window ref (lazy-validated cache)
 local prev_jump = nil    -- { workspace = name, window_id = id } for toggle-jump
 
 ---user callback, called with workspace name after switching
@@ -44,6 +46,21 @@ Workspaces.onSwitch = nil
 ---@param spoon table Codex spoon instance
 function Workspaces.init(spoon)
     codex = spoon
+end
+
+---resolve the workspace for a window using title rules then app rules
+---@param win userdata hs.window
+---@return string|nil workspace name, or nil to use default
+local function resolveWorkspace(win)
+    local title = win:title()
+    if title then
+        for _, rule in ipairs(title_rules) do
+            if title:match(rule.pattern) then return rule.workspace end
+        end
+    end
+    local app = win:application()
+    if app then return app_rules[app:title()] end
+    return nil
 end
 
 ---park coordinates at the bottom-right corner of the visible screen
@@ -243,10 +260,11 @@ local function _initialPark()
 end
 
 ---initialize workspaces
----@param opts table { workspaces=string[], appRules=table, jumpTargets=table }
+---@param opts table { workspaces=string[], appRules=table, titleRules=table, jumpTargets=table }
 function Workspaces.setup(opts)
     local names = opts.workspaces or {}
     local rules = opts.appRules or {}
+    title_rules = opts.titleRules or {}
     jump_targets = opts.jumpTargets or {}
 
     for _, name in ipairs(names) do
@@ -262,18 +280,26 @@ function Workspaces.setup(opts)
     -- Block focus-triggered workspace switches during setup
     switching = true
 
-    -- Assign existing windows to workspaces based on app rules
+    -- Assign existing windows to workspaces based on title/app rules
     local all_windows = codex.window_filter:getWindows()
     for _, win in ipairs(all_windows) do
-        local app = win:application()
-        if app then
-            local wsName = app_rules[app:title()] or current
-            local id = win:id()
-            if id then
-                ws_windows[wsName] = ws_windows[wsName] or {}
-                ws_windows[wsName][id] = true
-                win_ws[id] = wsName
-                win_pid[id] = app:pid()
+        local id = win:id()
+        if id then
+            local wsName = resolveWorkspace(win) or current
+            ws_windows[wsName] = ws_windows[wsName] or {}
+            ws_windows[wsName][id] = true
+            win_ws[id] = wsName
+            local app = win:application()
+            if app then win_pid[id] = app:pid() end
+            -- Cache jump target window refs
+            local title = win:title()
+            if title then
+                for category, targets in pairs(jump_targets) do
+                    local t = targets[wsName]
+                    if type(t) == "table" and t.title and title:match(t.title) then
+                        jump_window[category .. ":" .. wsName] = win
+                    end
+                end
             end
         end
     end
@@ -628,15 +654,23 @@ function Workspaces.onWindowCreated(win)
     if not id or win_ws[id] then return end  -- already tracked
 
     local app = win:application()
-    local wsName = current
-    if app then
-        win_pid[id] = app:pid()
-        wsName = app_rules[app:title()] or current
-    end
+    if app then win_pid[id] = app:pid() end
+    local wsName = resolveWorkspace(win) or current
 
     ws_windows[wsName] = ws_windows[wsName] or {}
     ws_windows[wsName][id] = true
     win_ws[id] = wsName
+
+    -- Cache window ref if it matches a jump target's title pattern
+    local title = win:title()
+    if title then
+        for category, targets in pairs(jump_targets) do
+            local target = targets[wsName]
+            if type(target) == "table" and target.title and title:match(target.title) then
+                jump_window[category .. ":" .. wsName] = win
+            end
+        end
+    end
 
     -- Auto-float windows on the scratch workspace
     if wsName == scratch_name then
@@ -774,26 +808,55 @@ end
 function Workspaces.jumpToApp(category)
     local targets = jump_targets[category]
     if not targets then return end
-    local appName = targets[current]
+    local target = targets[current]
+    if not target then return end
+
+    -- Normalize: plain string → { app = name }
+    local appName, titlePattern, launchCmd
+    if type(target) == "string" then
+        appName = target
+    else
+        appName = target.app
+        titlePattern = target.title
+        launchCmd = target.launch
+    end
     if not appName then return end
 
     saveJumpPoint()
 
-    -- Find app by name (single AX call), then match its windows against current workspace
-    local app = hs.application.find(appName)
-    if app then
-        local ws_ids = ws_windows[current] or {}
-        for _, win in ipairs(app:allWindows()) do
-            local id = win:id()
-            if id and ws_ids[id] then
-                win:focus()
+    -- Title-pattern targets: use cached window ref (set by onWindowCreated)
+    if titlePattern then
+        local cache_key = category .. ":" .. current
+        local cached = jump_window[cache_key]
+        if cached then
+            local id = cached:id()
+            if id and (ws_windows[current] or {})[id] then
+                cached:focus()
                 return
+            end
+            jump_window[cache_key] = nil  -- stale
+        end
+    else
+        -- Simple targets (single-process apps): find by app name
+        local app = hs.application.find(appName)
+        if app then
+            local ws_ids = ws_windows[current] or {}
+            for _, win in ipairs(app:allWindows()) do
+                local id = win:id()
+                if id and ws_ids[id] then
+                    win:focus()
+                    return
+                end
             end
         end
     end
 
-    -- No window found on this workspace — launch or focus the app
-    hs.application.launchOrFocus(appName)
+    -- No matching window — launch
+    if launchCmd then
+        hs.task.new(launchCmd[1], nil, table.move(launchCmd, 2, #launchCmd, 1, {})):start()
+    else
+        hs.application.launchOrFocus(appName)
+    end
 end
 
 ---toggle between current position and previous jump target

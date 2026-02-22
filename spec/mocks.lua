@@ -341,6 +341,7 @@ function M.init_mocks(modules)
                 return nil
             end,
             launchOrFocus = function(name) end,
+            runningApplications = function() return {} end,
         },
     }
 

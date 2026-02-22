@@ -83,6 +83,7 @@ describe("Codex.workspaces", function()
         local config = {
             workspaces = opts.workspaces or { "personal", "work", "global" },
             appRules = opts.appRules or {},
+            titleRules = opts.titleRules or {},
             jumpTargets = opts.jumpTargets or {},
         }
         Workspaces.setup(config)
@@ -577,6 +578,155 @@ describe("Codex.workspaces", function()
             Workspaces.jumpToApp("browser")
 
             assert.spy(launch_spy).was.called_with("Safari")
+        end)
+
+        it("should focus cached window for title-pattern target", function()
+            local w1 = makeWin(1, "[personal] ~/code", "WezTerm", 100)
+            all_filter_windows = { w1 }
+            focused_window = w1
+
+            setupStandard({
+                titleRules = {
+                    { pattern = "^%[personal%]", workspace = "personal" },
+                    { pattern = "^%[work%]",     workspace = "work" },
+                },
+                jumpTargets = {
+                    terminal = {
+                        personal = { app = "WezTerm", title = "^%[personal%]",
+                                     launch = { "/usr/bin/true" } },
+                    },
+                },
+            })
+
+            local focus_spy = spy.on(w1, "focus")
+            Workspaces.jumpToApp("terminal")
+
+            assert.spy(focus_spy).was.called()
+        end)
+
+        it("should launch when no cached window exists for title-pattern target", function()
+            setupStandard({
+                jumpTargets = {
+                    terminal = {
+                        personal = { app = "WezTerm", title = "^%[personal%]",
+                                     launch = { "/usr/bin/wezterm", "connect", "personal" } },
+                    },
+                },
+            })
+
+            local task_started = false
+            hs.task.new = function(cmd, cb, args)
+                return {
+                    _cmd = cmd,
+                    _args = args,
+                    start = function(self)
+                        task_started = true
+                        return self
+                    end,
+                }
+            end
+
+            Workspaces.jumpToApp("terminal")
+            assert.is_true(task_started)
+        end)
+
+        it("should not launch duplicate when cached window is stale", function()
+            local w1 = makeWin(1, "[personal] ~/code", "WezTerm", 100)
+            all_filter_windows = { w1 }
+            focused_window = w1
+
+            setupStandard({
+                titleRules = {
+                    { pattern = "^%[personal%]", workspace = "personal" },
+                },
+                jumpTargets = {
+                    terminal = {
+                        personal = { app = "WezTerm", title = "^%[personal%]",
+                                     launch = { "/usr/bin/wezterm", "connect", "personal" } },
+                    },
+                },
+            })
+
+            -- First jump should hit cache
+            local focus_spy = spy.on(w1, "focus")
+            Workspaces.jumpToApp("terminal")
+            assert.spy(focus_spy).was.called()
+
+            -- Simulate window destruction: remove from workspace tracking
+            Workspaces.onWindowDestroyed(w1)
+
+            -- Second jump: cache is stale (id removed from ws_windows), should launch
+            local task_started = false
+            hs.task.new = function(cmd, cb, args)
+                return {
+                    start = function(self) task_started = true; return self end,
+                }
+            end
+            Workspaces.jumpToApp("terminal")
+            assert.is_true(task_started)
+        end)
+    end)
+
+    describe("titleRules", function()
+        it("should route windows by title pattern", function()
+            local w1 = makeWin(1, "[work] ~/project", "WezTerm", 100)
+            all_filter_windows = { w1 }
+
+            setupStandard({
+                titleRules = {
+                    { pattern = "^%[work%]", workspace = "work" },
+                },
+            })
+
+            local work_ids = Workspaces.windowIds("work")
+            assert.is_true(work_ids[1] == true)
+        end)
+
+        it("should prefer title rules over app rules", function()
+            local w1 = makeWin(1, "[personal] ~/code", "WezTerm", 100)
+            all_filter_windows = { w1 }
+
+            setupStandard({
+                appRules = { WezTerm = "work" },
+                titleRules = {
+                    { pattern = "^%[personal%]", workspace = "personal" },
+                },
+            })
+
+            -- Title rule wins over app rule
+            local personal_ids = Workspaces.windowIds("personal")
+            assert.is_true(personal_ids[1] == true)
+            local work_ids = Workspaces.windowIds("work")
+            assert.is_nil(work_ids[1])
+        end)
+
+        it("should fall back to app rules when no title match", function()
+            local w1 = makeWin(1, "plain terminal", "WezTerm", 100)
+            all_filter_windows = { w1 }
+
+            setupStandard({
+                appRules = { WezTerm = "work" },
+                titleRules = {
+                    { pattern = "^%[personal%]", workspace = "personal" },
+                },
+            })
+
+            local work_ids = Workspaces.windowIds("work")
+            assert.is_true(work_ids[1] == true)
+        end)
+
+        it("should route new windows by title in onWindowCreated", function()
+            setupStandard({
+                titleRules = {
+                    { pattern = "^%[work%]", workspace = "work" },
+                },
+            })
+
+            local w1 = makeWin(1, "[work] ~/project", "WezTerm", 100)
+            Workspaces.onWindowCreated(w1)
+
+            local work_ids = Workspaces.windowIds("work")
+            assert.is_true(work_ids[1] == true)
         end)
     end)
 
