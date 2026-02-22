@@ -140,6 +140,34 @@ Codex.scroll_window = { "alt", "cmd" }
 Codex.scroll_gain = 10.0
 ```
 
+### Anchor Behavior
+
+The focused window is always left-anchored at the screen edge. Two options
+control how neighboring columns are positioned:
+
+```lua
+Codex.sticky_pairs = true       -- (default: true)
+Codex.right_anchor_last = true  -- (default: true)
+```
+
+**`sticky_pairs`** -- When focusing a non-first column, keep the left neighbor
+visible alongside it (split-screen pairing). If both windows fit on screen,
+the focused window shifts right to make room. If the left neighbor is too wide,
+the focused window left-anchors at the screen edge. Disable for pure
+left-anchoring on every column.
+
+**`right_anchor_last`** -- When focusing the last column, snap it to the right
+edge of the screen. This eliminates dead space and gives a "filling in a known
+set" feel. Disable to have the last column use the same left-anchor (or sticky
+pair) logic as middle columns.
+
+| sticky_pairs | right_anchor_last | Behavior |
+|:---:|:---:|---|
+| on | on | Side-by-side pairing + right-flush last column |
+| on | off | Side-by-side pairing everywhere, including last column |
+| off | on | Pure left-anchor + right-flush last column |
+| off | off | Pure left-anchor on every column |
+
 ### Misc
 
 ```lua
