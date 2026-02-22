@@ -190,13 +190,37 @@ Codex.workspaces.setup({
         Spotify  = "global",
     },
 
-    -- Jump targets: category -> { workspace -> appName }
+    -- Route windows by title pattern (checked before appRules)
+    titleRules = {
+        { pattern = "^%[personal%]", workspace = "personal" },
+        { pattern = "^%[work%]",     workspace = "work" },
+    },
+
+    -- Jump targets: category -> { workspace -> appName | {app, title, launch} }
     jumpTargets = {
         browser  = { personal = "Safari",  work = "Google Chrome" },
-        terminal = { personal = "WezTerm", work = "WezTerm" },
+        terminal = {
+            personal = { app = "WezTerm", title = "^%[personal%]",
+                         launch = { "/Applications/WezTerm.app/Contents/MacOS/wezterm",
+                                    "connect", "personal" } },
+            work     = { app = "WezTerm", title = "^%[work%]",
+                         launch = { "/Applications/WezTerm.app/Contents/MacOS/wezterm",
+                                    "connect", "work" } },
+        },
     },
 })
 ```
+
+**`titleRules`** match against `win:title()` using Lua patterns, checked before
+`appRules`. Useful for multi-process apps like WezTerm where each mux domain
+runs a separate process with a domain prefix in the window title.
+
+**Extended jump targets** use `{app, title, launch}` tables instead of plain
+strings. The `title` pattern identifies which window belongs to this target.
+Window refs are cached at creation time and lazy-validated on lookup (zero AX
+calls on cache hit). The `launch` command runs via `hs.task` when no matching
+window exists -- useful for `wezterm connect` which spawns a new process per
+invocation.
 
 ### Scratch Workspace
 
