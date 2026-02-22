@@ -32,6 +32,7 @@ local switching = false  -- re-entrancy guard for switchTo
 local focus_timer = nil  -- debounce timer for onWindowFocused
 local app_rules = {}     -- appName -> workspace name
 local screen_changed = false  -- set by screen watcher, forces retile on next switch
+local ws_pending = {}         -- name -> { {id=number, win=window_ref}, ... }
 local screen_watcher = nil    -- hs.screen.watcher instance
 local scratch_name = nil -- name of the scratch workspace (no tiling)
 local pre_scratch = nil  -- workspace we came from before entering scratch
@@ -292,6 +293,36 @@ function Workspaces.setup(opts)
         -- Pause events to avoid per-window retiling
         codex.events.paused = true
 
+        -- Build snapshots for non-current workspaces before removing their windows.
+        -- All windows share one macOS space, so partition the tiling state by workspace.
+        local full_snap = codex.state.snapshotSpace(space)
+        if full_snap and full_snap.window_list then
+            for _, col in ipairs(full_snap.window_list) do
+                local by_ws = {}
+                for _, win in ipairs(col) do
+                    local ws = win_ws[win:id()]
+                    if ws and ws ~= current then
+                        by_ws[ws] = by_ws[ws] or {}
+                        by_ws[ws][#by_ws[ws] + 1] = win
+                    end
+                end
+                for ws, wins in pairs(by_ws) do
+                    ws_snapshots[ws] = ws_snapshots[ws] or { window_list = {}, x_positions = {} }
+                    ws_snapshots[ws].window_list[#ws_snapshots[ws].window_list + 1] = wins
+                end
+            end
+            if full_snap.x_positions then
+                for _, snap in pairs(ws_snapshots) do
+                    for _, col in ipairs(snap.window_list) do
+                        for _, win in ipairs(col) do
+                            local x = full_snap.x_positions[win:id()]
+                            if x then snap.x_positions[win:id()] = x end
+                        end
+                    end
+                end
+            end
+        end
+
         -- Remove non-current workspace windows from tiling and collect park ops
         local park_ops = {}
         for name, ids in pairs(ws_windows) do
@@ -435,6 +466,7 @@ local function _doSwitch(name)
 
     -- 8–10. Restore state, watchers, tileSpace — skip for scratch
     local snap = nil
+    local pending = nil
     local did_tile = false
     local t_validate = hs.timer.absoluteTime()
     local t_restore_snap = t_validate
@@ -457,10 +489,33 @@ local function _doSwitch(name)
 
         t_watchers = hs.timer.absoluteTime()
 
-        if not snap or not snap.window_list or #snap.window_list == 0 or screen_changed then
+        -- Add pending windows (moved here while inactive) to tiling state
+        pending = ws_pending[name]
+        ws_pending[name] = nil
+
+        if pending then
+            for _, entry in ipairs(pending) do
+                -- pcall guards against stale userdata if window was destroyed
+                -- without triggering the windowDestroyed event
+                local ok, id = pcall(function() return entry.win:id() end)
+                if ok and id == entry.id
+                    and ws_windows[name][entry.id]
+                    and not codex.state.is_floating[entry.id]
+                    and not codex.state.windowIndex(entry.win) then
+                    codex.windows.addWindow(entry.win)
+                end
+            end
+        end
+
+        -- Retile if needed
+        if not snap or not snap.window_list or #snap.window_list == 0
+            or screen_changed or pending then
             codex.events.paused = false
             codex:tileSpace(space)
-            codex.windows.refreshWindows()
+            -- Only do expensive refreshWindows for screen changes (legacy path)
+            if screen_changed then
+                codex.windows.refreshWindows()
+            end
             screen_changed = false
             did_tile = true
         end
@@ -469,7 +524,16 @@ local function _doSwitch(name)
     end
 
     -- 11. Focus last-focused window (while events still paused to prevent tileSpace cascade)
-    --     Use window refs from snapshot to avoid expensive Window.get() / allWindows() AX query
+    --     Use window refs from snapshot/pending to avoid expensive Window.get() / allWindows() AX query
+
+    -- Build pending lookup for direct ref access (no Window.get needed)
+    local pending_wins = {}
+    if pending then
+        for _, entry in ipairs(pending) do
+            pending_wins[entry.id] = entry.win
+        end
+    end
+
     local focus_win = nil
     local focus_id = ws_focused[name]
     if name == scratch_name then
@@ -484,6 +548,9 @@ local function _doSwitch(name)
                 if focus_win then break end
             end
         end
+    elseif pending_wins[focus_id] then
+        -- Moved window: use stored ref directly (no AX call)
+        focus_win = pending_wins[focus_id]
     elseif snap and snap.window_list then
         for _, col in ipairs(snap.window_list) do
             for _, win in ipairs(col) do
@@ -552,6 +619,14 @@ function Workspaces.moveWindowTo(name)
     if src and ws_windows[src] then
         ws_windows[src][id] = nil
     end
+    -- Clean up stale pending entry on source workspace
+    if src and ws_pending[src] then
+        local p = ws_pending[src]
+        for i = #p, 1, -1 do
+            if p[i].id == id then table.remove(p, i) end
+        end
+        if #p == 0 then ws_pending[src] = nil end
+    end
 
     -- Add to target workspace
     ws_windows[name][id] = true
@@ -563,6 +638,15 @@ function Workspaces.moveWindowTo(name)
     elseif src == scratch_name then
         codex.state.is_floating[id] = nil
     end
+
+    -- Track moved window for direct insertion on next switch (deduplicate)
+    ws_pending[name] = ws_pending[name] or {}
+    local p = ws_pending[name]
+    for i = #p, 1, -1 do
+        if p[i].id == id then table.remove(p, i) end
+    end
+    p[#p + 1] = { id = id, win = win }
+    ws_focused[name] = id  -- focus the moved window when we switch to target
 
     -- If target is not current workspace, park the window
     if name ~= current then
@@ -600,16 +684,20 @@ function Workspaces.moveWindowTo(name)
             batchMoveWindows({
                 { id = id, pid = win_pid[id], x = park_x, y = park_y, w = 0, h = 0 }
             })
-            -- Update snapshot for current workspace
+            -- Focus the neighbor BEFORE tileSpace so the anchor window is valid
+            if neighbor then
+                neighbor:focus()
+            end
+
+            -- Update snapshot and retile current workspace
             local space = Spaces.activeSpaces()[screen:getUUID()]
             if space then
                 ws_snapshots[current] = codex.state.snapshotSpace(space)
-                codex:tileSpace(space)
-            end
-
-            -- Focus the neighbor we found before removing
-            if neighbor then
-                neighbor:focus()
+                -- Only retile if there are remaining tiled windows
+                local remaining = codex.state.windowList(space)
+                if remaining and #remaining > 0 then
+                    codex:tileSpace(space)
+                end
             end
         end
     end
@@ -673,6 +761,14 @@ function Workspaces.onWindowDestroyed(win)
     end
     -- Clean up the snapshot for this workspace
     if wsName then removeFromSnapshot(wsName, id) end
+    -- Clean up pending entries for destroyed window
+    if wsName and ws_pending[wsName] then
+        local p = ws_pending[wsName]
+        for i = #p, 1, -1 do
+            if p[i].id == id then table.remove(p, i) end
+        end
+        if #p == 0 then ws_pending[wsName] = nil end
+    end
     win_ws[id] = nil
     win_pid[id] = nil
     ws_frames[id] = nil
