@@ -597,6 +597,7 @@ end
 ---switch to a workspace (saves jump point first)
 ---@param name string workspace to switch to
 function Workspaces.switchTo(name)
+    if not ws_windows[name] or name == current or switching then return end
     saveJumpPoint()
     _doSwitch(name)
 end
