@@ -146,15 +146,14 @@ function Codex:bindHotkeys(mapping)
     self.actions.bindHotkeys(mapping)
 end
 
----dispatch: run scratch_fn on scratch workspace, tiling_fn otherwise
----@param scratch_fn function action for scratch workspace
+---dispatch: run unmanaged_fn on unmanaged workspaces, tiling_fn otherwise
+---@param unmanaged_fn function action for unmanaged (floating) workspaces
 ---@param tiling_fn function action for tiling workspaces
 ---@return function
-function Codex:dispatch(scratch_fn, tiling_fn)
+function Codex:dispatch(unmanaged_fn, tiling_fn)
     return function()
-        if self.workspaces and self.workspaces.scratchName()
-           and self.workspaces.currentSpace() == self.workspaces.scratchName() then
-            scratch_fn()
+        if self.workspaces and self.workspaces.isUnmanaged() then
+            unmanaged_fn()
         else
             tiling_fn()
         end

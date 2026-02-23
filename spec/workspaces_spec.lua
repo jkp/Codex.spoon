@@ -302,8 +302,7 @@ describe("Codex.workspaces", function()
             local w1 = makeWin(1, "W1")
             all_filter_windows = { w1 }
 
-            setupStandard({ workspaces = { "personal", "scratch" } })
-            Workspaces.setupScratch("scratch")
+            setupStandard({ workspaces = { "personal", { name = "scratch", layout = "unmanaged" } } })
 
             -- Move w1 to scratch
             focused_window = w1
@@ -424,8 +423,7 @@ describe("Codex.workspaces", function()
             local w1 = makeWin(1, "W1")
             focused_window = w1
             all_filter_windows = { w1 }
-            setupStandard({ workspaces = { "personal", "scratch" } })
-            Workspaces.setupScratch("scratch")
+            setupStandard({ workspaces = { "personal", { name = "scratch", layout = "unmanaged" } } })
 
             Workspaces.moveWindowTo("scratch")
 
@@ -494,8 +492,7 @@ describe("Codex.workspaces", function()
         end)
 
         it("should auto-float windows assigned to scratch", function()
-            setupStandard({ workspaces = { "personal", "scratch" }, appRules = { Scratch = "scratch" } })
-            Workspaces.setupScratch("scratch")
+            setupStandard({ workspaces = { "personal", { name = "scratch", layout = "unmanaged" } }, appRules = { Scratch = "scratch" } })
 
             local w1 = makeWin(10, "Scratch Window", "Scratch", 500)
             Workspaces.onWindowCreated(w1)
@@ -875,11 +872,28 @@ describe("Codex.workspaces", function()
         end)
     end)
 
-    describe("scratch helpers", function()
-        it("should set scratch name via setupScratch", function()
+    describe("isUnmanaged", function()
+        it("should return true for workspace with layout=unmanaged", function()
+            setupStandard({ workspaces = { "personal", { name = "scratch", layout = "unmanaged" } } })
+            assert.is_true(Workspaces.isUnmanaged("scratch"))
+        end)
+
+        it("should return false for regular workspace", function()
+            setupStandard({ workspaces = { "personal", { name = "scratch", layout = "unmanaged" } } })
+            assert.is_false(Workspaces.isUnmanaged("personal"))
+        end)
+
+        it("should default to current workspace", function()
+            setupStandard({ workspaces = { "personal", { name = "scratch", layout = "unmanaged" } } })
+            assert.is_false(Workspaces.isUnmanaged())
+            Workspaces.switchTo("scratch")
+            assert.is_true(Workspaces.isUnmanaged())
+        end)
+
+        it("should support legacy setupScratch", function()
             setupStandard({ workspaces = { "personal", "scratch" } })
             Workspaces.setupScratch("scratch")
-            assert.are.equal("scratch", Workspaces.scratchName())
+            assert.is_true(Workspaces.isUnmanaged("scratch"))
         end)
     end)
 
@@ -929,8 +943,7 @@ describe("Codex.workspaces", function()
             all_filter_windows = { w1 }
             focused_window = w1
 
-            setupStandard({ workspaces = { "personal", "scratch" }, toggleBack = true })
-            Workspaces.setupScratch("scratch")
+            setupStandard({ workspaces = { "personal", { name = "scratch", layout = "unmanaged" } }, toggleBack = true })
 
             Workspaces.switchTo("scratch")
             assert.are.equal("scratch", Workspaces.currentSpace())
@@ -1321,8 +1334,7 @@ describe("Codex.workspaces", function()
             local w1 = makeWin(1, "W1", "Terminal", 100)
             all_filter_windows = { w1 }
             focused_window = w1
-            setupStandard({ workspaces = { "personal", "scratch" } })
-            Workspaces.setupScratch("scratch")
+            setupStandard({ workspaces = { "personal", { name = "scratch", layout = "unmanaged" } } })
 
             State.windowList(1)[1] = { w1 }
 
@@ -1512,12 +1524,183 @@ describe("Codex.workspaces", function()
             assert.is_true(ids[1] == true)
         end)
 
-        it("should return scratch name", function()
-            setupStandard()
-            assert.is_nil(Workspaces.scratchName())
+        it("should return isUnmanaged via setupScratch", function()
+            setupStandard({ workspaces = { "personal", "scratch" } })
+            assert.is_false(Workspaces.isUnmanaged("scratch"))
 
             Workspaces.setupScratch("scratch")
-            assert.are.equal("scratch", Workspaces.scratchName())
+            assert.is_true(Workspaces.isUnmanaged("scratch"))
+        end)
+    end)
+
+    describe("app-centric config", function()
+        -- Helper: set up with app-centric config
+        local function setupApps(opts)
+            opts = opts or {}
+            local config = {
+                workspaces = opts.workspaces or { "personal", "work" },
+                toggleBack = opts.toggleBack or false,
+                apps = opts.apps or {},
+            }
+            Workspaces.setup(config)
+            return config
+        end
+
+        it("should assign windows by workspace from apps config", function()
+            local w1 = makeWin(1, "Browser", "Safari", 100)
+            all_filter_windows = { w1 }
+
+            setupApps({
+                apps = {
+                    Safari = { workspace = "work" },
+                },
+            })
+
+            local work_ids = Workspaces.windowIds("work")
+            assert.is_true(work_ids[1] == true)
+        end)
+
+        it("should build title rules from apps with title patterns", function()
+            local w1 = makeWin(1, "[work] ~/project", "WezTerm", 100)
+            all_filter_windows = { w1 }
+
+            setupApps({
+                apps = {
+                    WezTerm = {
+                        { workspace = "personal", title = "^%[personal%]" },
+                        { workspace = "work", title = "^%[work%]" },
+                    },
+                },
+            })
+
+            local work_ids = Workspaces.windowIds("work")
+            assert.is_true(work_ids[1] == true)
+        end)
+
+        it("should build jump targets from apps config", function()
+            local w1 = makeWin(1, "Safari Tab", "Safari", 100)
+            all_filter_windows = { w1 }
+            focused_window = w1
+
+            hs.application.find = function(name)
+                if name == "Safari" then
+                    return { allWindows = function() return { w1 } end }
+                end
+                return nil
+            end
+
+            setupApps({
+                apps = {
+                    Safari = { workspace = "personal", jump = "browser" },
+                },
+            })
+
+            local focus_spy = spy.on(w1, "focus")
+            Workspaces.jumpToApp("browser")
+            assert.spy(focus_spy).was.called()
+        end)
+
+        it("should set focusFollows from apps config", function()
+            local w1 = makeWin(1, "W1", "Terminal", 100)
+            local w2 = makeWin(2, "Safari Tab", "Safari", 200)
+            all_filter_windows = { w1, w2 }
+
+            setupApps({
+                workspaces = { "work", "personal" },
+                apps = {
+                    Safari = { workspace = "personal", focusFollows = true },
+                    Terminal = { workspace = "work" },
+                },
+            })
+
+            -- w2 (Safari) is on personal, current is work → w2 is hidden
+            assert.is_true(State.isHidden(2))
+
+            -- Disable auto-timers to capture the debounce timer
+            Mocks._auto_execute_timers = false
+            Mocks._timer_callbacks = {}
+
+            -- macOS gives Safari focus
+            focused_window = w2
+            Workspaces.onWindowFocused(w2)
+
+            -- Fire the debounce timer
+            for _, t in ipairs(Mocks._timer_callbacks) do
+                if t._fn and not t._stopped then
+                    t._fn()
+                end
+            end
+
+            assert.are.equal("personal", Workspaces.currentSpace())
+        end)
+
+        it("should handle multi-instance apps with title-pattern jump targets", function()
+            local w1 = makeWin(1, "[personal] ~/code", "WezTerm", 100)
+            all_filter_windows = { w1 }
+            focused_window = w1
+
+            setupApps({
+                apps = {
+                    WezTerm = {
+                        { workspace = "personal", jump = "terminal", title = "^%[personal%]",
+                          launch = { "/usr/bin/true" } },
+                        { workspace = "work", jump = "terminal", title = "^%[work%]",
+                          launch = { "/usr/bin/true" } },
+                    },
+                },
+            })
+
+            -- Window should be on personal (matched by title)
+            assert.is_true(Workspaces.windowIds("personal")[1] == true)
+
+            -- Jump should find it via cache
+            local focus_spy = spy.on(w1, "focus")
+            Workspaces.jumpToApp("terminal")
+            assert.spy(focus_spy).was.called()
+        end)
+
+        it("should support unmanaged layout in workspace list", function()
+            setupApps({
+                workspaces = { "personal", { name = "scratch", layout = "unmanaged" } },
+                apps = {},
+            })
+
+            assert.is_true(Workspaces.isUnmanaged("scratch"))
+            assert.is_false(Workspaces.isUnmanaged("personal"))
+        end)
+
+        it("should auto-float on unmanaged workspace via apps config", function()
+            setupApps({
+                workspaces = { "personal", { name = "scratch", layout = "unmanaged" } },
+                apps = { Finder = { workspace = "scratch" } },
+            })
+
+            local w1 = makeWin(10, "Finder Window", "Finder", 500)
+            Workspaces.onWindowCreated(w1)
+
+            assert.is_true(State.is_floating[10])
+        end)
+
+        it("should not set app_rules for entries with title patterns", function()
+            -- Multi-instance: title entries should NOT create app_rules
+            -- (otherwise all WezTerm windows would match the app rule)
+            local w1 = makeWin(1, "untitled", "WezTerm", 100)
+            all_filter_windows = { w1 }
+
+            setupApps({
+                apps = {
+                    WezTerm = {
+                        { workspace = "personal", title = "^%[personal%]" },
+                        { workspace = "work", title = "^%[work%]" },
+                    },
+                },
+            })
+
+            -- No title match, no app_rules entry → falls to current (personal)
+            local personal_ids = Workspaces.windowIds("personal")
+            assert.is_true(personal_ids[1] == true)
+            local work_ids = Workspaces.windowIds("work")
+            assert.is_nil(work_ids[1])
         end)
     end)
 end)

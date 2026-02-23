@@ -31,7 +31,7 @@ local title_rules = {}   -- ordered list of { pattern=string, workspace=string }
 local screen_changed = false  -- set by screen watcher, forces retile on next switch
 local ws_pending = {}         -- name -> { {id=number, win=window_ref}, ... }
 local screen_watcher = nil    -- hs.screen.watcher instance
-local scratch_name = nil -- name of the scratch workspace (no tiling)
+local ws_layout = {}    -- name -> "scrolling" | "unmanaged"
 local ws_filter = nil    -- separate window filter for workspace lifecycle hooks
 local toggle_back = false -- when true, pressing the same switch/jump key toggles back
 local focus_follows = {} -- appName -> true (apps that trigger workspace switch on focus)
@@ -284,28 +284,82 @@ local function _initialPark()
     switching = false
 end
 
+---expand app-centric config into internal tables
+---@param apps table appName -> config | config[]
+local function _expandApps(apps)
+    for appName, config in pairs(apps) do
+        -- Normalize: single config → iterate once, array → iterate each
+        local entries = config
+        if not config[1] then entries = { config } end
+
+        for _, entry in ipairs(entries) do
+            if entry.title then
+                title_rules[#title_rules + 1] = {
+                    pattern = entry.title,
+                    workspace = entry.workspace,
+                }
+            else
+                app_rules[appName] = entry.workspace
+            end
+
+            if entry.jump then
+                jump_targets[entry.jump] = jump_targets[entry.jump] or {}
+                if entry.title or entry.launch then
+                    jump_targets[entry.jump][entry.workspace] = {
+                        app = appName,
+                        title = entry.title,
+                        launch = entry.launch,
+                    }
+                else
+                    jump_targets[entry.jump][entry.workspace] = appName
+                end
+            end
+
+            if entry.focusFollows then
+                focus_follows[appName] = true
+            end
+        end
+    end
+end
+
 ---initialize workspaces
----@param opts table { workspaces=string[], appRules=table, titleRules=table, jumpTargets=table }
+---@param opts table { workspaces=string[], apps=table } or legacy { appRules=table, ... }
 function Workspaces.setup(opts)
-    local names = opts.workspaces or {}
-    local rules = opts.appRules or {}
-    title_rules = opts.titleRules or {}
-    jump_targets = opts.jumpTargets or {}
+    local names_raw = opts.workspaces or {}
     toggle_back = opts.toggleBack or false
 
-    for _, appName in ipairs(opts.focusFollows or {}) do
-        focus_follows[appName] = true
+    -- Parse workspace list: string → scrolling, table → use .layout
+    local names = {}
+    for _, entry in ipairs(names_raw) do
+        if type(entry) == "string" then
+            names[#names + 1] = entry
+            ws_layout[entry] = "scrolling"
+        else
+            names[#names + 1] = entry.name
+            ws_layout[entry.name] = entry.layout or "scrolling"
+        end
+    end
+
+    -- App-centric config vs legacy
+    if opts.apps then
+        _expandApps(opts.apps)
+    else
+        -- Legacy format
+        local rules = opts.appRules or {}
+        title_rules = opts.titleRules or {}
+        jump_targets = opts.jumpTargets or {}
+        for appName, wsName in pairs(rules) do
+            app_rules[appName] = wsName
+        end
+        for _, appName in ipairs(opts.focusFollows or {}) do
+            focus_follows[appName] = true
+        end
     end
 
     for _, name in ipairs(names) do
         ws_windows[name] = {}
     end
     current = names[1]
-
-    -- Build app rules
-    for appName, wsName in pairs(rules) do
-        app_rules[appName] = wsName
-    end
 
     -- Block focus-triggered workspace switches during setup
     switching = true
@@ -450,9 +504,9 @@ end
 ---@param focus_id number|nil last-focused window id for this workspace
 ---@return userdata|nil window ref to focus
 local function _findFocusTarget(name, snap, pending, focus_id)
-    if name == scratch_name then
-        -- Scratch windows aren't in the snapshot (they're floating), so look them up directly.
-        -- Try the last-focused window first, then fall back to any window on scratch.
+    if ws_layout[name] == "unmanaged" then
+        -- Unmanaged windows aren't in the snapshot (they're floating), so look them up directly.
+        -- Try the last-focused window first, then fall back to any window on this workspace.
         local focus_win = nil
         if focus_id and ws_windows[name][focus_id] then
             focus_win = Window.get(focus_id)
@@ -563,20 +617,20 @@ local function _doSwitch(name)
 
     local t_async = hs.timer.absoluteTime()
 
-    -- 7. Ensure all scratch windows are floating
-    if name == scratch_name then
+    -- 7. Ensure all unmanaged workspace windows are floating
+    if ws_layout[name] == "unmanaged" then
         for id in pairs(ws_windows[name] or {}) do
             codex.state.is_floating[id] = true
         end
     end
 
-    -- 8. Restore state, watchers, tileSpace — skip for scratch
+    -- 8. Restore state, watchers, tileSpace — skip for unmanaged
     local snap, pending, did_tile
     local t_validate = hs.timer.absoluteTime()
     local t_watchers = t_validate
     local t_tile = t_validate
 
-    if name ~= scratch_name then
+    if ws_layout[name] ~= "unmanaged" then
         snap, pending, did_tile = _restoreWorkspace(name, space)
         t_tile = hs.timer.absoluteTime()
     end
@@ -590,8 +644,8 @@ local function _doSwitch(name)
         focus_win:focus()
     end
 
-    -- 10. Unpause events (keep paused on scratch) and clear switching guard
-    if name ~= scratch_name then
+    -- 10. Unpause events (keep paused on unmanaged) and clear switching guard
+    if ws_layout[name] ~= "unmanaged" then
         codex.events.paused = false
     end
     switching = false
@@ -650,10 +704,10 @@ function Workspaces.moveWindowTo(name)
     ws_windows[name][id] = true
     win_ws[id] = name
 
-    -- Float/unfloat based on scratch workspace
-    if name == scratch_name then
+    -- Float/unfloat based on unmanaged workspace
+    if ws_layout[name] == "unmanaged" then
         codex.state.is_floating[id] = true
-    elseif src == scratch_name then
+    elseif src and ws_layout[src] == "unmanaged" then
         codex.state.is_floating[id] = nil
     end
 
@@ -723,8 +777,8 @@ function Workspaces.onWindowCreated(win)
         end
     end
 
-    -- Auto-float windows on the scratch workspace
-    if wsName == scratch_name then
+    -- Auto-float windows on unmanaged workspaces
+    if ws_layout[wsName] == "unmanaged" then
         codex.state.is_floating[id] = true
     end
 
@@ -812,10 +866,11 @@ function Workspaces.currentSpace()
     return current
 end
 
----get the scratch workspace name
----@return string|nil
-function Workspaces.scratchName()
-    return scratch_name
+---check if a workspace uses unmanaged (floating) layout
+---@param name string|nil workspace name, defaults to current
+---@return boolean
+function Workspaces.isUnmanaged(name)
+    return ws_layout[name or current] == "unmanaged"
 end
 
 ---get window ids for a workspace
@@ -983,10 +1038,10 @@ function Workspaces.toggleJump()
     end
 end
 
----mark a workspace as the scratch (no-tiling) workspace
----@param name string workspace name to use as scratch
+---mark a workspace as unmanaged (no-tiling) — backward compat
+---@param name string workspace name to mark as unmanaged
 function Workspaces.setupScratch(name)
-    scratch_name = name
+    ws_layout[name] = "unmanaged"
 end
 
 return Workspaces

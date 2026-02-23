@@ -7,7 +7,6 @@ local Scratch = {}
 
 -- Spoon reference (set by init)
 local codex = nil
-local scratch_name = nil
 
 ---initialize scratch module with reference to the Codex spoon
 ---@param spoon table Codex spoon instance
@@ -15,18 +14,15 @@ function Scratch.init(spoon)
     codex = spoon
 end
 
----set up scratch workspace
----@param name string scratch workspace name
-function Scratch.setup(name)
-    scratch_name = name
-    codex.workspaces.setupScratch(name)
+---set up scratch module (no-arg; unmanaged layout is declared in workspaces config)
+function Scratch.setup()
 end
 
----get candidate windows on the scratch workspace
+---get candidate windows on the current workspace (only meaningful on unmanaged workspaces)
 ---@return userdata[] list of hs.window objects
 local function candidates()
-    if not codex or not scratch_name then return {} end
-    local ids = codex.workspaces.windowIds(scratch_name)
+    if not codex then return {} end
+    local ids = codex.workspaces.windowIds(codex.workspaces.currentSpace())
     local wins = {}
     for id in pairs(ids) do
         local win = hs.window.get(id)

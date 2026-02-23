@@ -17,15 +17,16 @@ PaperWM.spoon nailed horizontal scrolling tiling on macOS. What it lacked:
 - **App jumping** -- jump to a specific app category (browser, terminal, LLM,
   comms) with workspace awareness. Toggle-on-repeat: pressing the same key
   again returns you to where you were.
-- **Scratch workspace** -- a floating (non-tiling) workspace for transient
-  windows, with Rectangle-style snap cycling.
+- **Unmanaged workspaces** -- any workspace can be declared as `unmanaged`
+  (floating, non-tiling) for transient windows, with Rectangle-style snap
+  cycling.
 
 ## What Codex Adds Over PaperWM.spoon
 
 | Feature | PaperWM.spoon | Codex |
 |---------|--------------|-------|
 | Virtual workspaces | -- | Off-screen parking, instant switch |
-| Scratch workspace | -- | Auto-floating, snap cycling |
+| Unmanaged workspaces | -- | Auto-floating, snap cycling |
 | Jump-to-app | -- | Workspace-aware, toggle-on-repeat |
 | Native `winmove` shim | -- | Parallel AX, animation bypass, 100ms timeout |
 | Workspace-aware dispatch | -- | Same key does different things on scratch vs tiling |
@@ -176,64 +177,82 @@ Codex.center_mouse = false  -- don't center cursor on space switch (default: tru
 
 ## Workspaces
 
-Workspaces are configured via `Codex.workspaces.setup()` after `Codex:start()`:
+Workspaces are configured via `Codex.workspaces.setup()` after `Codex:start()`.
+The app-centric config puts all per-app settings in one place:
 
 ```lua
 Codex.workspaces.setup({
-    workspaces = {"personal", "work", "global", "scratch"},
+    workspaces = {
+        "personal",
+        "work",
+        "utility",
+        { name = "scratch", layout = "unmanaged" },
+    },
     toggleBack = true,  -- pressing same switch/jump key again toggles back
 
-    -- Assign apps to workspaces (unmatched apps go to the active workspace)
-    appRules = {
-        Safari   = "personal",
-        Claude   = "personal",
-        ["Google Chrome"] = "work",
-        Spotify  = "global",
-    },
+    apps = {
+        Safari   = { workspace = "personal", jump = "browser", focusFollows = true },
+        Claude   = { workspace = "personal", jump = "llm" },
+        Messages = { workspace = "personal", jump = "comms" },
 
-    -- Route windows by title pattern (checked before appRules)
-    titleRules = {
-        { pattern = "^%[personal%]", workspace = "personal" },
-        { pattern = "^%[work%]",     workspace = "work" },
-    },
+        Helium            = { workspace = "work", jump = "browser" },
+        ChatGPT           = { workspace = "work", jump = "llm" },
+        ["Google Chrome"] = { workspace = "work" },
 
-    -- Jump targets: category -> { workspace -> appName | {app, title, launch} }
-    jumpTargets = {
-        browser  = { personal = "Safari",  work = "Google Chrome" },
-        terminal = {
-            personal = { app = "WezTerm", title = "^%[personal%]",
-                         launch = { "/Applications/WezTerm.app/Contents/MacOS/wezterm",
-                                    "connect", "personal" } },
-            work     = { app = "WezTerm", title = "^%[work%]",
-                         launch = { "/Applications/WezTerm.app/Contents/MacOS/wezterm",
-                                    "connect", "work" } },
+        Spotify  = { workspace = "utility" },
+        Obsidian = { workspace = "utility" },
+
+        -- Multi-instance: array of configs, title pattern disambiguates
+        WezTerm = {
+            { workspace = "personal", jump = "terminal", title = "^%[personal%]",
+              launch = { "/Applications/WezTerm.app/Contents/MacOS/wezterm",
+                         "connect", "personal" } },
+            { workspace = "work", jump = "terminal", title = "^%[work%]",
+              launch = { "/Applications/WezTerm.app/Contents/MacOS/wezterm",
+                         "connect", "work" } },
         },
     },
 })
+
+Codex.scratch.setup()
 ```
 
-**`titleRules`** match against `win:title()` using Lua patterns, checked before
-`appRules`. Useful for multi-process apps like WezTerm where each mux domain
-runs a separate process with a domain prefix in the window title.
+Each app entry can have:
 
-**Extended jump targets** use `{app, title, launch}` tables instead of plain
-strings. The `title` pattern identifies which window belongs to this target.
-Window refs are cached at creation time and lazy-validated on lookup (zero AX
-calls on cache hit). The `launch` command runs via `hs.task` when no matching
-window exists -- useful for `wezterm connect` which spawns a new process per
-invocation.
+| Key | Description |
+|-----|-------------|
+| `workspace` | Which workspace the app belongs to |
+| `jump` | Jump category (e.g. `"browser"`, `"terminal"`) |
+| `focusFollows` | Auto-switch workspace when this app gets focus |
+| `title` | Lua pattern for title-based routing (multi-instance apps) |
+| `launch` | Command to run when no matching window exists |
 
-### Scratch Workspace
+**Multi-instance apps** use an array of configs with `title` patterns to
+disambiguate. Entries with `title` create title rules (checked before app
+rules). Entries without `title` create app rules.
 
-Set up a floating workspace where windows are never tiled:
+### Unmanaged (Floating) Workspaces
+
+Declare any workspace as unmanaged by using a table entry with
+`layout = "unmanaged"`:
 
 ```lua
-Codex.scratch.setup("scratch")
+workspaces = {
+    "personal",                                    -- tiling (default)
+    { name = "scratch", layout = "unmanaged" },    -- floating
+}
 ```
 
-Windows moved to scratch are auto-floated. Windows moved off scratch are
-re-tiled. Scratch provides Rectangle-style snap cycling (`snap("left")` etc.)
-and centered size cycling.
+Windows on unmanaged workspaces are auto-floated. Windows moved off an
+unmanaged workspace are re-tiled. The scratch module provides Rectangle-style
+snap cycling (`snap("left")` etc.) and centered size cycling.
+
+Check whether the current workspace is unmanaged:
+
+```lua
+Codex.workspaces.isUnmanaged()          -- current workspace
+Codex.workspaces.isUnmanaged("scratch") -- specific workspace
+```
 
 ### Workspace API
 
@@ -243,20 +262,21 @@ Codex.workspaces.moveWindowTo("personal")   -- move focused window
 Codex.workspaces.jumpToApp("browser")       -- jump to app category (toggles back if already focused)
 Codex.workspaces.toggleJump()               -- flip between last two targets
 Codex.workspaces.currentSpace()             -- get current workspace name
+Codex.workspaces.isUnmanaged()              -- true if current workspace is floating
 Codex.workspaces.dump()                     -- debug print all state
 ```
 
 ### Workspace-Aware Dispatch
 
 Use `Codex:dispatch()` to bind the same key to different actions depending on
-whether you're on a tiling or scratch workspace:
+whether you're on a tiling or unmanaged workspace:
 
 ```lua
 local scratch = Codex.scratch
 local actions = Codex.actions.actions()
 
 hs.hotkey.bind(meh, "m", Codex:dispatch(
-    function() scratch.focus("left") end,  -- scratch action
+    function() scratch.focus("left") end,  -- unmanaged action
     actions.focus_left                      -- tiling action
 ))
 ```
