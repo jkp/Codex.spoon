@@ -853,6 +853,10 @@ describe("Codex.workspaces", function()
         end)
 
         it("should toggle scratch via switchTo when toggleBack enabled", function()
+            local w1 = makeWin(1, "W1")
+            all_filter_windows = { w1 }
+            focused_window = w1
+
             setupStandard({ workspaces = { "personal", "scratch" }, toggleBack = true })
             Workspaces.setupScratch("scratch")
 

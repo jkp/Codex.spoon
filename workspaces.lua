@@ -32,8 +32,8 @@ local screen_changed = false  -- set by screen watcher, forces retile on next sw
 local ws_pending = {}         -- name -> { {id=number, win=window_ref}, ... }
 local screen_watcher = nil    -- hs.screen.watcher instance
 local scratch_name = nil -- name of the scratch workspace (no tiling)
-local pre_scratch = nil  -- workspace we came from before entering scratch
 local ws_filter = nil    -- separate window filter for workspace lifecycle hooks
+local toggle_back = false -- when true, pressing the same switch/jump key toggles back
 local jump_targets = {}  -- category -> { workspace -> appName | {app,title,launch} }
 local jump_window = {}   -- "category:workspace" -> window ref (lazy-validated cache)
 local prev_jump = nil    -- { workspace = name, window_id = id } for toggle-jump
@@ -266,6 +266,7 @@ function Workspaces.setup(opts)
     local rules = opts.appRules or {}
     title_rules = opts.titleRules or {}
     jump_targets = opts.jumpTargets or {}
+    toggle_back = opts.toggleBack or false
 
     for _, name in ipairs(names) do
         ws_windows[name] = {}
@@ -581,9 +582,16 @@ local function _doSwitch(name)
 end
 
 ---switch to a workspace (saves jump point first)
+---when toggle_back is enabled and already on target, switch to previous workspace
 ---@param name string workspace to switch to
 function Workspaces.switchTo(name)
-    if not ws_windows[name] or name == current or switching then return end
+    if not ws_windows[name] or switching then return end
+    if name == current then
+        if not toggle_back or not prev_jump
+            or prev_jump.workspace == current then return end
+        _doSwitch(prev_jump.workspace)
+        return
+    end
     saveJumpPoint()
     _doSwitch(name)
 end
@@ -837,6 +845,29 @@ function Workspaces.jumpToApp(category)
     end
     if not appName then return end
 
+    -- Toggle-back: if focused window IS the target, delegate to toggleJump
+    if toggle_back then
+        local focused = Window.focusedWindow()
+        if focused then
+            local fid = focused:id()
+            if fid and (ws_windows[current] or {})[fid] then
+                local is_target = false
+                if titlePattern then
+                    local cache_key = category .. ":" .. current
+                    local cached = jump_window[cache_key]
+                    is_target = cached and cached:id() == fid
+                else
+                    local app = focused:application()
+                    is_target = app and app:title() == appName
+                end
+                if is_target then
+                    Workspaces.toggleJump()
+                    return
+                end
+            end
+        end
+    end
+
     saveJumpPoint()
 
     -- Title-pattern targets: use cached window ref (set by onWindowCreated)
@@ -911,17 +942,6 @@ end
 ---@param name string workspace name to use as scratch
 function Workspaces.setupScratch(name)
     scratch_name = name
-end
-
----toggle between scratch workspace and previous workspace
-function Workspaces.toggleScratch()
-    if not scratch_name then return end
-    if current == scratch_name then
-        _doSwitch(pre_scratch or "personal")
-    else
-        pre_scratch = current
-        _doSwitch(scratch_name)
-    end
 end
 
 return Workspaces
