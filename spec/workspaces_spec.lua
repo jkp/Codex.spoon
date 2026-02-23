@@ -86,6 +86,7 @@ describe("Codex.workspaces", function()
             titleRules = opts.titleRules or {},
             jumpTargets = opts.jumpTargets or {},
             toggleBack = opts.toggleBack or false,
+            focusFollows = opts.focusFollows or {},
         }
         Workspaces.setup(config)
         return config

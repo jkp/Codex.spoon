@@ -34,6 +34,7 @@ local screen_watcher = nil    -- hs.screen.watcher instance
 local scratch_name = nil -- name of the scratch workspace (no tiling)
 local ws_filter = nil    -- separate window filter for workspace lifecycle hooks
 local toggle_back = false -- when true, pressing the same switch/jump key toggles back
+local focus_follows = {} -- appName -> true (apps that trigger workspace switch on focus)
 local jump_targets = {}  -- category -> { workspace -> appName | {app,title,launch} }
 local jump_window = {}   -- "category:workspace" -> window ref (lazy-validated cache)
 local prev_jump = nil    -- { workspace = name, window_id = id } for toggle-jump
@@ -267,6 +268,10 @@ function Workspaces.setup(opts)
     title_rules = opts.titleRules or {}
     jump_targets = opts.jumpTargets or {}
     toggle_back = opts.toggleBack or false
+
+    for _, appName in ipairs(opts.focusFollows or {}) do
+        focus_follows[appName] = true
+    end
 
     for _, name in ipairs(names) do
         ws_windows[name] = {}
@@ -751,7 +756,11 @@ function Workspaces.onWindowFocused(win)
     if not win or not win.id then return end
     local id = win:id()
     if not id then return end
-    if codex.state.isHidden(id) then return end
+    if codex.state.isHidden(id) then
+        local app = win:application()
+        local appName = app and app:title()
+        if not appName or not focus_follows[appName] then return end
+    end
 
     -- Track last-focused on current workspace
     local wsName = win_ws[id]
