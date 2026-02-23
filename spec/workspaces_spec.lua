@@ -85,6 +85,7 @@ describe("Codex.workspaces", function()
             appRules = opts.appRules or {},
             titleRules = opts.titleRules or {},
             jumpTargets = opts.jumpTargets or {},
+            toggleBack = opts.toggleBack or false,
         }
         Workspaces.setup(config)
         return config
@@ -808,32 +809,155 @@ describe("Codex.workspaces", function()
             Workspaces.setupScratch("scratch")
             assert.are.equal("scratch", Workspaces.scratchName())
         end)
+    end)
 
-        it("should toggle to scratch workspace", function()
-            setupStandard({ workspaces = { "personal", "scratch" } })
-            Workspaces.setupScratch("scratch")
+    describe("toggle-back", function()
+        it("should toggle back when switchTo called with current workspace and toggleBack enabled", function()
+            local w1 = makeWin(1, "W1")
+            all_filter_windows = { w1 }
+            focused_window = w1
 
-            Workspaces.toggleScratch()
+            setupStandard({ toggleBack = true })
 
-            assert.are.equal("scratch", Workspaces.currentSpace())
-        end)
+            -- Switch personal → work (saves jump point)
+            Workspaces.switchTo("work")
+            assert.are.equal("work", Workspaces.currentSpace())
 
-        it("should toggle back from scratch to previous workspace", function()
-            setupStandard({ workspaces = { "personal", "scratch" } })
-            Workspaces.setupScratch("scratch")
-
-            Workspaces.toggleScratch()  -- go to scratch
-            assert.are.equal("scratch", Workspaces.currentSpace())
-
-            Workspaces.toggleScratch()  -- back to personal
+            -- Press switchTo("work") again → should toggle back to personal
+            Workspaces.switchTo("work")
             assert.are.equal("personal", Workspaces.currentSpace())
         end)
 
-        it("should be no-op when scratch not configured", function()
-            setupStandard()
-            -- scratchName is nil, toggleScratch should be no-op
-            Workspaces.toggleScratch()
+        it("should not toggle back without toggleBack option", function()
+            local w1 = makeWin(1, "W1")
+            all_filter_windows = { w1 }
+            focused_window = w1
+
+            setupStandard({ toggleBack = false })
+
+            Workspaces.switchTo("work")
+            assert.are.equal("work", Workspaces.currentSpace())
+
+            -- Same key again → should be no-op (toggleBack not enabled)
+            Workspaces.switchTo("work")
+            assert.are.equal("work", Workspaces.currentSpace())
+        end)
+
+        it("should not toggle back when no prev_jump exists", function()
+            setupStandard({ toggleBack = true })
+
+            -- No prior switch, so prev_jump is nil
+            -- switchTo("personal") while on personal → should be no-op
+            Workspaces.switchTo("personal")
             assert.are.equal("personal", Workspaces.currentSpace())
+        end)
+
+        it("should toggle scratch via switchTo when toggleBack enabled", function()
+            setupStandard({ workspaces = { "personal", "scratch" }, toggleBack = true })
+            Workspaces.setupScratch("scratch")
+
+            Workspaces.switchTo("scratch")
+            assert.are.equal("scratch", Workspaces.currentSpace())
+
+            -- Press switchTo("scratch") again → toggle back
+            Workspaces.switchTo("scratch")
+            assert.are.equal("personal", Workspaces.currentSpace())
+        end)
+
+        it("should toggle jumpToApp when target already focused", function()
+            local w1 = makeWin(1, "W1", "Terminal", 100)
+            local w2 = makeWin(2, "Safari Tab", "Safari", 200)
+            all_filter_windows = { w1, w2 }
+
+            hs.application.find = function(name)
+                if name == "Safari" then
+                    return { allWindows = function() return { w2 } end }
+                end
+                return nil
+            end
+
+            setupStandard({
+                toggleBack = true,
+                jumpTargets = { browser = { personal = "Safari" } },
+            })
+
+            -- Focus w1, then jump to browser (Safari)
+            focused_window = w1
+            Workspaces.jumpToApp("browser")
+
+            -- Now w2 (Safari) is focused
+            focused_window = w2
+
+            -- Jump to browser again → should toggle back (focus w1)
+            local focus_spy = spy.on(w1, "focus")
+            Workspaces.jumpToApp("browser")
+
+            -- toggleJump should have been called, focusing w1
+            assert.spy(focus_spy).was.called()
+        end)
+
+        it("should not toggle jumpToApp when different window focused", function()
+            local w1 = makeWin(1, "W1", "Terminal", 100)
+            local w2 = makeWin(2, "Safari Tab", "Safari", 200)
+            local w3 = makeWin(3, "Other", "Other", 300)
+            all_filter_windows = { w1, w2, w3 }
+
+            hs.application.find = function(name)
+                if name == "Safari" then
+                    return { allWindows = function() return { w2 } end }
+                end
+                return nil
+            end
+
+            setupStandard({
+                toggleBack = true,
+                jumpTargets = { browser = { personal = "Safari" } },
+            })
+
+            -- Focus w1, jump to browser
+            focused_window = w1
+            Workspaces.jumpToApp("browser")
+
+            -- Now focus w3 (not the browser target)
+            focused_window = w3
+
+            -- Jump to browser → should do normal jump (focus w2), not toggle
+            local focus_spy = spy.on(w2, "focus")
+            Workspaces.jumpToApp("browser")
+
+            assert.spy(focus_spy).was.called()
+        end)
+
+        it("should toggle jumpToApp for title-pattern target when cached window focused", function()
+            local w1 = makeWin(1, "W1", "Other", 100)
+            local w2 = makeWin(2, "[personal] ~/code", "WezTerm", 200)
+            all_filter_windows = { w1, w2 }
+
+            setupStandard({
+                toggleBack = true,
+                titleRules = {
+                    { pattern = "^%[personal%]", workspace = "personal" },
+                },
+                jumpTargets = {
+                    terminal = {
+                        personal = { app = "WezTerm", title = "^%[personal%]",
+                                     launch = { "/usr/bin/true" } },
+                    },
+                },
+            })
+
+            -- Focus w1, jump to terminal (w2)
+            focused_window = w1
+            Workspaces.jumpToApp("terminal")
+
+            -- Now w2 is focused
+            focused_window = w2
+
+            -- Jump to terminal again → should toggle back
+            local focus_spy = spy.on(w1, "focus")
+            Workspaces.jumpToApp("terminal")
+
+            assert.spy(focus_spy).was.called()
         end)
     end)
 
