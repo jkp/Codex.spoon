@@ -86,7 +86,7 @@ describe("Codex.workspaces", function()
             titleRules = opts.titleRules or {},
             jumpTargets = opts.jumpTargets or {},
             toggleBack = opts.toggleBack or false,
-            focusFollows = opts.focusFollows or {},
+            focusFollowsOff = opts.focusFollowsOff or {},
         }
         Workspaces.setup(config)
         return config
@@ -1410,7 +1410,6 @@ describe("Codex.workspaces", function()
             setupStandard({
                 appRules = { Safari = "personal", Terminal = "work" },
                 workspaces = { "work", "personal" },
-                focusFollows = { "Safari" },
             })
 
             -- w2 (Safari) is on personal, current is work → w2 is hidden
@@ -1435,7 +1434,7 @@ describe("Codex.workspaces", function()
             assert.are.equal("personal", Workspaces.currentSpace())
         end)
 
-        it("should not switch workspace for non-focusFollows app when hidden", function()
+        it("should not switch workspace for focusFollows=false app when hidden", function()
             local w1 = makeWin(1, "W1", "Terminal", 100)
             local w2 = makeWin(2, "Spotify", "Spotify", 200)
             all_filter_windows = { w1, w2 }
@@ -1443,7 +1442,7 @@ describe("Codex.workspaces", function()
             setupStandard({
                 appRules = { Spotify = "personal", Terminal = "work" },
                 workspaces = { "work", "personal" },
-                focusFollows = { "Safari" },
+                focusFollowsOff = { "Spotify" },
             })
 
             -- w2 (Spotify) is on personal, current is work → w2 is hidden
@@ -1457,7 +1456,7 @@ describe("Codex.workspaces", function()
             focused_window = w2
             Workspaces.onWindowFocused(w2)
 
-            -- No timer should be created (isHidden guard blocks non-focusFollows apps)
+            -- No timer should be created (focusFollows=false blocks it)
             local timer_created = false
             for _, t in ipairs(Mocks._timer_callbacks) do
                 if t._fn and not t._stopped then
@@ -1478,7 +1477,6 @@ describe("Codex.workspaces", function()
             setupStandard({
                 appRules = { Safari = "personal", Terminal = "work" },
                 workspaces = { "work", "personal" },
-                focusFollows = { "Safari" },
             })
 
             -- Disable auto-timers to control debounce manually
@@ -1588,7 +1586,7 @@ describe("Codex.workspaces", function()
             assert.spy(focus_spy).was.called()
         end)
 
-        it("should set focusFollows from apps config", function()
+        it("should follow focus by default for all apps", function()
             local w1 = makeWin(1, "W1", "Terminal", 100)
             local w2 = makeWin(2, "Safari Tab", "Safari", 200)
             all_filter_windows = { w1, w2 }
@@ -1596,7 +1594,7 @@ describe("Codex.workspaces", function()
             setupApps({
                 workspaces = { "work", "personal" },
                 apps = {
-                    Safari = { workspace = "personal", focusFollows = true },
+                    Safari = { workspace = "personal" },
                     Terminal = { workspace = "work" },
                 },
             })
@@ -1620,6 +1618,37 @@ describe("Codex.workspaces", function()
             end
 
             assert.are.equal("personal", Workspaces.currentSpace())
+        end)
+
+        it("should not follow focus for apps with focusFollows=false", function()
+            local w1 = makeWin(1, "W1", "Terminal", 100)
+            local w2 = makeWin(2, "Spotify", "Spotify", 200)
+            all_filter_windows = { w1, w2 }
+
+            setupApps({
+                workspaces = { "work", "personal" },
+                apps = {
+                    Spotify = { workspace = "personal", focusFollows = false },
+                    Terminal = { workspace = "work" },
+                },
+            })
+
+            assert.is_true(State.isHidden(2))
+
+            Mocks._auto_execute_timers = false
+            Mocks._timer_callbacks = {}
+
+            focused_window = w2
+            Workspaces.onWindowFocused(w2)
+
+            local timer_created = false
+            for _, t in ipairs(Mocks._timer_callbacks) do
+                if t._fn and not t._stopped then
+                    timer_created = true
+                end
+            end
+            assert.is_false(timer_created)
+            assert.are.equal("work", Workspaces.currentSpace())
         end)
 
         it("should handle multi-instance apps with title-pattern jump targets", function()

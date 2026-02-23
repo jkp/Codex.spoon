@@ -34,7 +34,7 @@ local screen_watcher = nil    -- hs.screen.watcher instance
 local ws_layout = {}    -- name -> "scrolling" | "unmanaged"
 local ws_filter = nil    -- separate window filter for workspace lifecycle hooks
 local toggle_back = false -- when true, pressing the same switch/jump key toggles back
-local focus_follows = {} -- appName -> true (apps that trigger workspace switch on focus)
+local focus_follows_off = {} -- appName -> true (apps that DON'T trigger workspace switch on focus)
 local jump_targets = {}  -- category -> { workspace -> appName | {app,title,launch} }
 local jump_window = {}   -- "category:workspace" -> window ref (lazy-validated cache)
 local prev_jump = nil    -- { workspace = name, window_id = id } for toggle-jump
@@ -315,8 +315,8 @@ local function _expandApps(apps)
                 end
             end
 
-            if entry.focusFollows then
-                focus_follows[appName] = true
+            if entry.focusFollows == false then
+                focus_follows_off[appName] = true
             end
         end
     end
@@ -351,8 +351,8 @@ function Workspaces.setup(opts)
         for appName, wsName in pairs(rules) do
             app_rules[appName] = wsName
         end
-        for _, appName in ipairs(opts.focusFollows or {}) do
-            focus_follows[appName] = true
+        for _, appName in ipairs(opts.focusFollowsOff or {}) do
+            focus_follows_off[appName] = true
         end
     end
 
@@ -839,7 +839,7 @@ function Workspaces.onWindowFocused(win)
     if codex.state.isHidden(id) then
         local app = win:application()
         local appName = app and app:title()
-        if not appName or not focus_follows[appName] then return end
+        if not appName or focus_follows_off[appName] then return end
     end
 
     -- Track last-focused on current workspace

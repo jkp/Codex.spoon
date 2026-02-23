@@ -221,7 +221,7 @@ Each app entry can have:
 |-----|-------------|
 | `workspace` | Which workspace the app belongs to |
 | `jump` | Jump category (e.g. `"browser"`, `"terminal"`) |
-| `focusFollows` | Auto-switch workspace when this app gets focus |
+| `focusFollows` | `false` to prevent Cmd+Tab from switching workspace (default: `true`) |
 | `title` | Lua pattern for title-based routing (multi-instance apps) |
 | `launch` | Command to run when no matching window exists |
 
