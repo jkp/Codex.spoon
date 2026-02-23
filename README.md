@@ -15,8 +15,8 @@ PaperWM.spoon nailed horizontal scrolling tiling on macOS. What it lacked:
   take seconds. Codex uses a native Swift shim (`winmove`) that parallelizes
   AX calls across apps, bringing switch time down to ~150ms.
 - **App jumping** -- jump to a specific app category (browser, terminal, LLM,
-  comms) with workspace awareness. Toggle-jump flips between your last two
-  intentional targets.
+  comms) with workspace awareness. Toggle-on-repeat: pressing the same key
+  again returns you to where you were.
 - **Scratch workspace** -- a floating (non-tiling) workspace for transient
   windows, with Rectangle-style snap cycling.
 
@@ -26,7 +26,7 @@ PaperWM.spoon nailed horizontal scrolling tiling on macOS. What it lacked:
 |---------|--------------|-------|
 | Virtual workspaces | -- | Off-screen parking, instant switch |
 | Scratch workspace | -- | Auto-floating, snap cycling |
-| Jump-to-app | -- | Workspace-aware, with toggle-jump |
+| Jump-to-app | -- | Workspace-aware, toggle-on-repeat |
 | Native `winmove` shim | -- | Parallel AX, animation bypass, 100ms timeout |
 | Workspace-aware dispatch | -- | Same key does different things on scratch vs tiling |
 | Per-side window gaps | -- | `{top=8, bottom=8, left=8, right=8}` |
@@ -181,6 +181,7 @@ Workspaces are configured via `Codex.workspaces.setup()` after `Codex:start()`:
 ```lua
 Codex.workspaces.setup({
     workspaces = {"personal", "work", "global", "scratch"},
+    toggleBack = true,  -- pressing same switch/jump key again toggles back
 
     -- Assign apps to workspaces (unmatched apps go to the active workspace)
     appRules = {
@@ -237,11 +238,10 @@ and centered size cycling.
 ### Workspace API
 
 ```lua
-Codex.workspaces.switchTo("work")           -- switch workspace
+Codex.workspaces.switchTo("work")           -- switch workspace (toggles back if already there)
 Codex.workspaces.moveWindowTo("personal")   -- move focused window
-Codex.workspaces.jumpToApp("browser")       -- jump to app category
+Codex.workspaces.jumpToApp("browser")       -- jump to app category (toggles back if already focused)
 Codex.workspaces.toggleJump()               -- flip between last two targets
-Codex.workspaces.toggleScratch()            -- toggle scratch workspace
 Codex.workspaces.currentSpace()             -- get current workspace name
 Codex.workspaces.dump()                     -- debug print all state
 ```
