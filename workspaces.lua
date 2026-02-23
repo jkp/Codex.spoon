@@ -38,6 +38,7 @@ local focus_follows = {} -- appName -> true (apps that trigger workspace switch 
 local jump_targets = {}  -- category -> { workspace -> appName | {app,title,launch} }
 local jump_window = {}   -- "category:workspace" -> window ref (lazy-validated cache)
 local prev_jump = nil    -- { workspace = name, window_id = id } for toggle-jump
+local app_jump_from = {} -- workspace_name -> window_id (for app-jump toggle)
 
 ---user callback, called with workspace name after switching
 ---@type fun(name: string)|nil
@@ -768,6 +769,10 @@ function Workspaces.onWindowDestroyed(win)
     if prev_jump and prev_jump.window_id == id then
         prev_jump = nil
     end
+    -- Clear app_jump_from if it pointed to this window
+    if wsName and app_jump_from[wsName] == id then
+        app_jump_from[wsName] = nil
+    end
 end
 
 ---handle window focus — switch workspace if focused window is on a different one
@@ -875,7 +880,7 @@ function Workspaces.jumpToApp(category)
     end
     if not appName then return end
 
-    -- Toggle-back: if focused window IS the target, delegate to toggleJump
+    -- Toggle-back: if focused window IS the target, toggle back to app_jump_from
     if toggle_back then
         local focused = Window.focusedWindow()
         if focused then
@@ -891,14 +896,24 @@ function Workspaces.jumpToApp(category)
                     is_target = app and app:title() == appName
                 end
                 if is_target then
-                    Workspaces.toggleJump()
+                    local from_id = app_jump_from[current]
+                    if from_id and ws_windows[current] and ws_windows[current][from_id] then
+                        -- Swap: next toggle returns here
+                        app_jump_from[current] = fid
+                        local win = Window.get(from_id)
+                        if win then win:focus() end
+                    end
                     return
                 end
             end
         end
     end
 
-    saveJumpPoint()
+    -- Save workspace-local jump point for app-jump toggle
+    local focused = Window.focusedWindow()
+    if focused and focused:id() then
+        app_jump_from[current] = focused:id()
+    end
 
     -- Title-pattern targets: use cached window ref (set by onWindowCreated)
     if titlePattern then

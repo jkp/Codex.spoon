@@ -968,8 +968,90 @@ describe("Codex.workspaces", function()
             local focus_spy = spy.on(w1, "focus")
             Workspaces.jumpToApp("browser")
 
-            -- toggleJump should have been called, focusing w1
+            -- Should have focused w1 via app_jump_from (workspace-local toggle)
             assert.spy(focus_spy).was.called()
+        end)
+
+        it("should app-jump toggle stay on current workspace even when prev_jump points elsewhere", function()
+            local w1 = makeWin(1, "W1", "Terminal", 100)
+            local w2 = makeWin(2, "Safari Tab", "Safari", 200)
+            local w3 = makeWin(3, "W3", "App", 300)
+            all_filter_windows = { w1, w2, w3 }
+
+            hs.application.find = function(name)
+                if name == "Safari" then
+                    return { allWindows = function() return { w2 } end }
+                end
+                return nil
+            end
+
+            setupStandard({
+                workspaces = { "personal", "work" },
+                toggleBack = true,
+                jumpTargets = { browser = { personal = "Safari", work = "Safari" } },
+            })
+
+            -- On personal: focus w1, jump to browser (w2)
+            focused_window = w1
+            Workspaces.jumpToApp("browser")
+            focused_window = w2
+
+            -- Switch to work (clobbers prev_jump to point at work)
+            Workspaces.switchTo("work")
+
+            -- Switch back to personal
+            Workspaces.switchTo("personal")
+            focused_window = w2
+
+            -- Now jump-to-browser toggle — should go back to w1, NOT switch to work
+            local focus_spy = spy.on(w1, "focus")
+            Workspaces.jumpToApp("browser")
+
+            assert.spy(focus_spy).was.called()
+            assert.are.equal("personal", Workspaces.currentSpace())
+        end)
+
+        it("should app-jump toggle swap back and forth within workspace", function()
+            local w1 = makeWin(1, "W1", "Terminal", 100)
+            local w2 = makeWin(2, "Safari Tab", "Safari", 200)
+            all_filter_windows = { w1, w2 }
+
+            hs.application.find = function(name)
+                if name == "Safari" then
+                    return { allWindows = function() return { w2 } end }
+                end
+                return nil
+            end
+
+            setupStandard({
+                toggleBack = true,
+                jumpTargets = { browser = { personal = "Safari" } },
+            })
+
+            -- w1 → jump to browser → w2
+            focused_window = w1
+            Workspaces.jumpToApp("browser")
+            focused_window = w2
+
+            -- w2 → toggle → w1
+            local focus_spy_w1 = spy.on(w1, "focus")
+            Workspaces.jumpToApp("browser")
+            assert.spy(focus_spy_w1).was.called()
+            focused_window = w1
+
+            -- w1 → toggle → w2
+            local focus_spy_w2 = spy.on(w2, "focus")
+            Workspaces.jumpToApp("browser")
+            assert.spy(focus_spy_w2).was.called()
+            focused_window = w2
+
+            -- w2 → toggle → w1 (again)
+            focus_spy_w1:clear()
+            Workspaces.jumpToApp("browser")
+            assert.spy(focus_spy_w1).was.called()
+
+            -- Never left personal
+            assert.are.equal("personal", Workspaces.currentSpace())
         end)
 
         it("should not toggle jumpToApp when different window focused", function()
