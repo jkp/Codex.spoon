@@ -1239,6 +1239,110 @@ describe("Codex.workspaces", function()
         end)
     end)
 
+    describe("focusFollows", function()
+        it("should switch workspace when focusFollows app gets focus while hidden", function()
+            local w1 = makeWin(1, "W1", "Terminal", 100)
+            local w2 = makeWin(2, "Safari Tab", "Safari", 200)
+            all_filter_windows = { w1, w2 }
+
+            -- Setup with auto-timers so initial setup completes
+            setupStandard({
+                appRules = { Safari = "personal", Terminal = "work" },
+                workspaces = { "work", "personal" },
+                focusFollows = { "Safari" },
+            })
+
+            -- w2 (Safari) is on personal, current is work → w2 is hidden
+            assert.is_true(State.isHidden(2))
+
+            -- Disable auto-timers to capture the debounce timer
+            Mocks._auto_execute_timers = false
+            Mocks._timer_callbacks = {}
+
+            -- macOS gives Safari focus (e.g. link clicked from WhatsApp)
+            focused_window = w2
+            Workspaces.onWindowFocused(w2)
+
+            -- Fire the debounce timer
+            for _, t in ipairs(Mocks._timer_callbacks) do
+                if t._fn and not t._stopped then
+                    t._fn()
+                end
+            end
+
+            -- Should have switched to personal (where Safari lives)
+            assert.are.equal("personal", Workspaces.currentSpace())
+        end)
+
+        it("should not switch workspace for non-focusFollows app when hidden", function()
+            local w1 = makeWin(1, "W1", "Terminal", 100)
+            local w2 = makeWin(2, "Spotify", "Spotify", 200)
+            all_filter_windows = { w1, w2 }
+
+            setupStandard({
+                appRules = { Spotify = "personal", Terminal = "work" },
+                workspaces = { "work", "personal" },
+                focusFollows = { "Safari" },
+            })
+
+            -- w2 (Spotify) is on personal, current is work → w2 is hidden
+            assert.is_true(State.isHidden(2))
+
+            -- Disable auto-timers
+            Mocks._auto_execute_timers = false
+            Mocks._timer_callbacks = {}
+
+            -- macOS gives Spotify focus
+            focused_window = w2
+            Workspaces.onWindowFocused(w2)
+
+            -- No timer should be created (isHidden guard blocks non-focusFollows apps)
+            local timer_created = false
+            for _, t in ipairs(Mocks._timer_callbacks) do
+                if t._fn and not t._stopped then
+                    timer_created = true
+                end
+            end
+            assert.is_false(timer_created)
+
+            -- Should still be on work
+            assert.are.equal("work", Workspaces.currentSpace())
+        end)
+
+        it("should respect debounce for focusFollows", function()
+            local w1 = makeWin(1, "W1", "Terminal", 100)
+            local w2 = makeWin(2, "Safari Tab", "Safari", 200)
+            all_filter_windows = { w1, w2 }
+
+            setupStandard({
+                appRules = { Safari = "personal", Terminal = "work" },
+                workspaces = { "work", "personal" },
+                focusFollows = { "Safari" },
+            })
+
+            -- Disable auto-timers to control debounce manually
+            Mocks._auto_execute_timers = false
+            Mocks._timer_callbacks = {}
+
+            -- Focus Safari (hidden, but focusFollows)
+            focused_window = w2
+            Workspaces.onWindowFocused(w2)
+
+            -- Before timer fires, focus moves back to w1
+            focused_window = w1
+
+            -- Fire the debounce timer — should NOT switch (focus moved away)
+            for _, t in ipairs(Mocks._timer_callbacks) do
+                if t._fn and not t._stopped then
+                    t._fn()
+                end
+            end
+
+            -- Should still be on work (debounce rejected the switch)
+            assert.are.equal("work", Workspaces.currentSpace())
+        end)
+    end)
+
     describe("accessors", function()
         it("should return current workspace name", function()
             setupStandard()
