@@ -936,7 +936,7 @@ function Workspaces.jumpToApp(category)
     if not appName then return end
 
     -- Toggle-back: if focused window IS the target, toggle back to app_jump_from
-    if toggle_back then
+    do
         local focused = Window.focusedWindow()
         if focused then
             local fid = focused:id()
@@ -957,8 +957,9 @@ function Workspaces.jumpToApp(category)
                         app_jump_from[current] = fid
                         local win = Window.get(from_id)
                         if win then win:focus() end
+                        return
                     end
-                    return
+                    -- No saved jump-from point: fall through to normal focus
                 end
             end
         end
