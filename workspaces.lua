@@ -936,7 +936,7 @@ function Workspaces.jumpToApp(category)
     if not appName then return end
 
     -- Toggle-back: if focused window IS the target, toggle back to app_jump_from
-    do
+    if toggle_back then
         local focused = Window.focusedWindow()
         if focused then
             local fid = focused:id()
@@ -1037,12 +1037,6 @@ function Workspaces.toggleJump()
             if win then win:focus() end
         end
     end
-end
-
----mark a workspace as unmanaged (no-tiling) — backward compat
----@param name string workspace name to mark as unmanaged
-function Workspaces.setupScratch(name)
-    ws_layout[name] = "unmanaged"
 end
 
 return Workspaces

@@ -213,8 +213,6 @@ Codex.workspaces.setup({
         },
     },
 })
-
-Codex.scratch.setup()
 ```
 
 Each app entry can have:

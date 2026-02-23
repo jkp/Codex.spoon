@@ -23,7 +23,6 @@ describe("Codex.scratch", function()
 
         mock_codex = {
             workspaces = {
-                setupScratch = function(name) end,
                 windowIds = function(name) return {} end,
                 currentSpace = function() return "scratch" end,
             },
@@ -407,7 +406,7 @@ describe("Codex.scratch", function()
             focused_window = win
             local s = spy.on(win, "focusWindowWest")
 
-            Scratch.setup("scratch")
+            Scratch.init(mock_codex)
             Scratch.focus("left")
 
             assert.spy(s).was.called()
@@ -418,7 +417,7 @@ describe("Codex.scratch", function()
             focused_window = win
             local s = spy.on(win, "focusWindowEast")
 
-            Scratch.setup("scratch")
+            Scratch.init(mock_codex)
             Scratch.focus("right")
 
             assert.spy(s).was.called()
@@ -429,7 +428,7 @@ describe("Codex.scratch", function()
             focused_window = win
             local s = spy.on(win, "focusWindowNorth")
 
-            Scratch.setup("scratch")
+            Scratch.init(mock_codex)
             Scratch.focus("up")
 
             assert.spy(s).was.called()
@@ -440,7 +439,7 @@ describe("Codex.scratch", function()
             focused_window = win
             local s = spy.on(win, "focusWindowSouth")
 
-            Scratch.setup("scratch")
+            Scratch.init(mock_codex)
             Scratch.focus("down")
 
             assert.spy(s).was.called()
@@ -448,7 +447,7 @@ describe("Codex.scratch", function()
 
         it("should be no-op for nil focused window", function()
             focused_window = nil
-            Scratch.setup("scratch")
+            Scratch.init(mock_codex)
             Scratch.focus("left")
         end)
     end)

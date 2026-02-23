@@ -14,10 +14,6 @@ function Scratch.init(spoon)
     codex = spoon
 end
 
----set up scratch module (no-arg; unmanaged layout is declared in workspaces config)
-function Scratch.setup()
-end
-
 ---get candidate windows on the current workspace (only meaningful on unmanaged workspaces)
 ---@return userdata[] list of hs.window objects
 local function candidates()

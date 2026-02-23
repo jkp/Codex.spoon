@@ -890,11 +890,6 @@ describe("Codex.workspaces", function()
             assert.is_true(Workspaces.isUnmanaged())
         end)
 
-        it("should support legacy setupScratch", function()
-            setupStandard({ workspaces = { "personal", "scratch" } })
-            Workspaces.setupScratch("scratch")
-            assert.is_true(Workspaces.isUnmanaged("scratch"))
-        end)
     end)
 
     describe("toggle-back", function()
@@ -1524,13 +1519,6 @@ describe("Codex.workspaces", function()
             assert.is_true(ids[1] == true)
         end)
 
-        it("should return isUnmanaged via setupScratch", function()
-            setupStandard({ workspaces = { "personal", "scratch" } })
-            assert.is_false(Workspaces.isUnmanaged("scratch"))
-
-            Workspaces.setupScratch("scratch")
-            assert.is_true(Workspaces.isUnmanaged("scratch"))
-        end)
     end)
 
     describe("app-centric config", function()
