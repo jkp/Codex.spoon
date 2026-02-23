@@ -49,6 +49,15 @@ function Workspaces.init(spoon)
     codex = spoon
 end
 
+---strip invisible Unicode characters (LRM, RLM, ZWS, ZWNJ, ZWJ, BOM)
+---macOS Catalyst/iOS apps embed these in their app names
+---@param s string
+---@return string
+local function stripInvisible(s)
+    if not s then return s end
+    return s:gsub("\xe2\x80[\x8b-\x8f]", ""):gsub("\xef\xbb\xbf", "")
+end
+
 ---resolve the workspace for a window using title rules then app rules
 ---@param win userdata hs.window
 ---@return string|nil workspace name, or nil to use default
@@ -60,7 +69,7 @@ local function resolveWorkspace(win)
         end
     end
     local app = win:application()
-    if app then return app_rules[app:title()] end
+    if app then return app_rules[stripInvisible(app:title())] end
     return nil
 end
 
@@ -186,12 +195,17 @@ local function _findNeighbor(space, idx)
 end
 
 ---park non-current workspace windows during initial setup
----called via Timer.doAfter(1.0) from setup() to let macOS finish window creation
+---called synchronously from setup() after window filter is created
 local function _initialPark()
     local screen = Screen.mainScreen()
     if not screen then switching = false; return end
     local space = Spaces.activeSpaces()[screen:getUUID()]
     if not space then switching = false; return end
+
+    -- Ensure all windows are in the tiling state with correct on-screen
+    -- frames. On reload, the window filter's async event delivery may not
+    -- have completed yet — refreshWindows does the same work synchronously.
+    codex.windows.refreshWindows()
 
     local park_x, park_y = parkCoords()
 
@@ -228,13 +242,22 @@ local function _initialPark()
         end
     end
 
+    -- Build id→ref lookup from filter (Window.get calls allWindows internally
+    -- and can fail during hs.reload when AX hasn't caught up yet)
+    local all_wins = codex.window_filter:getWindows()
+    local win_by_id = {}
+    for _, w in ipairs(all_wins) do
+        local wid = w:id()
+        if wid then win_by_id[wid] = w end
+    end
+
     -- Remove non-current workspace windows from tiling and collect park ops
     -- (batched into one moveWindows call for initial setup performance)
     local park_ops = {}
     for name, ids in pairs(ws_windows) do
         if name ~= current then
             for id in pairs(ids) do
-                local win = Window.get(id)
+                local win = win_by_id[id]
                 if win then
                     codex.windows.removeWindow(win, true)
                     codex.state.setHidden(id, true)
@@ -310,9 +333,6 @@ function Workspaces.setup(opts)
         end
     end
 
-    -- Park windows not on the initial workspace off-screen
-    Timer.doAfter(1.0, _initialPark)
-
     -- Watch for screen geometry changes (resolution, display added/removed)
     screen_watcher = hs.screen.watcher.new(function()
         screen_changed = true
@@ -339,6 +359,9 @@ function Workspaces.setup(opts)
     ws_filter:subscribe(WindowFilter.windowVisible, function(win) Workspaces.onWindowCreated(win) end)
     ws_filter:subscribe(WindowFilter.windowDestroyed, function(win) Workspaces.onWindowDestroyed(win) end)
     ws_filter:subscribe(WindowFilter.windowFocused, function(win) Workspaces.onWindowFocused(win) end)
+
+    -- Park non-current workspace windows synchronously (was Timer.doAfter(1.0))
+    _initialPark()
 end
 
 ---build restore and park move operations for a workspace switch
@@ -704,18 +727,16 @@ function Workspaces.onWindowCreated(win)
         codex.state.is_floating[id] = true
     end
 
-    -- If window belongs to a non-current workspace, park it after tiling finishes
+    -- If window belongs to a non-current workspace, park it immediately.
+    -- _parkWindow sets isHidden first, so Codex's async windowVisible handler
+    -- will skip this window when it fires (addWindow checks isHidden).
     if wsName ~= current then
+        codex.windows.removeWindow(win, true)
+        _parkWindow(id, win)
         local screen = Screen.mainScreen()
         if screen then
-            Timer.doAfter(0.1, function()
-                local w = Window.get(id)
-                if not w then return end
-                codex.windows.removeWindow(w, true)
-                _parkWindow(id, w)
-                local space = Spaces.activeSpaces()[screen:getUUID()]
-                if space then codex:tileSpace(space) end
-            end)
+            local space = Spaces.activeSpaces()[screen:getUUID()]
+            if space then codex:tileSpace(space) end
         end
     end
 end

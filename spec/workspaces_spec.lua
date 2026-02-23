@@ -123,6 +123,18 @@ describe("Codex.workspaces", function()
             assert.is_true(work_ids[1] == true)
         end)
 
+        it("should match app rules despite invisible Unicode chars in app name", function()
+            -- macOS Catalyst/iOS apps like WhatsApp embed U+200E (LRM) in their name
+            local lrm = "\xe2\x80\x8e"
+            local win = makeWin(1, lrm .. "WhatsApp", lrm .. "WhatsApp", 100)
+            all_filter_windows = { win }
+
+            setupStandard({ appRules = { WhatsApp = "work" } })
+
+            local work_ids = Workspaces.windowIds("work")
+            assert.is_true(work_ids[1] == true)
+        end)
+
         it("should assign unmatched windows to current workspace", function()
             local win = makeWin(1, "Terminal", "Terminal", 100)
             all_filter_windows = { win }
@@ -138,13 +150,48 @@ describe("Codex.workspaces", function()
             setupStandard()
         end)
 
-        it("should require at least one workspace", function()
-            -- Empty workspace list is not supported: setup uses current (nil)
-            -- as a table key in Timer.doAfter callback, which would error.
-            -- This test documents that at least one workspace is required.
-            assert.has_error(function()
-                setupStandard({ workspaces = {} })
-            end)
+        it("should call refreshWindows synchronously during setup", function()
+            local refresh_called = false
+            mock_codex.windows.refreshWindows = function() refresh_called = true end
+
+            setupStandard()
+
+            assert.is_true(refresh_called)
+        end)
+
+        it("should park non-current workspace windows synchronously during setup", function()
+            local w1 = makeWin(1, "Terminal", "Terminal", 100)
+            local w2 = makeWin(2, "Browser", "Safari", 200)
+            all_filter_windows = { w1, w2 }
+
+            local move_spy = spy.on(mock_codex.transport, "moveWindows")
+            setupStandard({ appRules = { Safari = "work" } })
+
+            -- w2 should be hidden (parked during setup, not via timer)
+            assert.is_true(State.isHidden(2))
+            -- moveWindows should have been called with park ops
+            assert.spy(move_spy).was.called()
+        end)
+
+        it("should park windows using filter refs, not Window.get", function()
+            local w1 = makeWin(1, "Terminal", "Terminal", 100)
+            local w2 = makeWin(2, "WhatsApp", "WhatsApp", 200)
+            all_filter_windows = { w1, w2 }
+
+            -- Make Window.get return nil for w2 (simulates AX failure during reload)
+            local orig_get = hs.window.get
+            hs.window.get = function(id)
+                if id == 2 then return nil end
+                return orig_get(id)
+            end
+
+            setupStandard({ appRules = { WhatsApp = "work" } })
+
+            -- w2 should STILL be parked despite Window.get returning nil
+            -- because _initialPark uses filter refs instead
+            assert.is_true(State.isHidden(2))
+
+            hs.window.get = orig_get
         end)
     end)
 
@@ -420,6 +467,30 @@ describe("Codex.workspaces", function()
 
             local personal_ids = Workspaces.windowIds("personal")
             assert.is_true(personal_ids[10] == true)
+        end)
+
+        it("should park non-current workspace window immediately (no timer)", function()
+            setupStandard({ appRules = { Firefox = "work" } })
+
+            local w1 = makeWin(10, "Firefox Window", "Firefox", 500)
+
+            -- Disable auto-timers to prove no timer is involved
+            Mocks._auto_execute_timers = false
+            Mocks._timer_callbacks = {}
+
+            Workspaces.onWindowCreated(w1)
+
+            -- Window should be hidden immediately, not after a timer
+            assert.is_true(State.isHidden(10))
+
+            -- No timers should have been created for parking
+            local park_timer_found = false
+            for _, t in ipairs(Mocks._timer_callbacks) do
+                if t._delay and t._delay < 0.2 then
+                    park_timer_found = true
+                end
+            end
+            assert.is_false(park_timer_found)
         end)
 
         it("should auto-float windows assigned to scratch", function()
