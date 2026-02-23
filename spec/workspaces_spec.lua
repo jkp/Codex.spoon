@@ -919,6 +919,9 @@ describe("Codex.workspaces", function()
             -- Setup with auto-timers so initial setup completes
             setupStandard({ appRules = { Browser = "work" } })
 
+            -- Simulate user bringing w2 on screen (e.g. Cmd+Tab) — clear hidden state
+            mock_codex.state.setHidden(2, nil)
+
             -- Now disable auto-timers to capture the debounce timer
             Mocks._auto_execute_timers = false
             Mocks._timer_callbacks = {}

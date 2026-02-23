@@ -310,7 +310,21 @@ function Workspaces.setup(opts)
     -- Watch for screen geometry changes (resolution, display added/removed)
     screen_watcher = hs.screen.watcher.new(function()
         screen_changed = true
-        codex.logger.d("screen geometry changed, will retile on next switch")
+        codex.logger.d("screen geometry changed, re-parking hidden windows")
+        -- Re-park all hidden windows at updated coordinates
+        local park_x, park_y = parkCoords()
+        local ops = {}
+        for id, ws in pairs(win_ws) do
+            if codex.state.isHidden(id) and ws ~= current then
+                local pid = win_pid[id]
+                if pid then
+                    ops[#ops + 1] = { id = id, pid = pid, x = park_x, y = park_y }
+                end
+            end
+        end
+        if #ops > 0 then
+            codex.transport.moveWindowsAsync(ops)
+        end
     end)
     screen_watcher:start()
 
@@ -729,6 +743,7 @@ function Workspaces.onWindowFocused(win)
     if not win or not win.id then return end
     local id = win:id()
     if not id then return end
+    if codex.state.isHidden(id) then return end
 
     -- Track last-focused on current workspace
     local wsName = win_ws[id]
