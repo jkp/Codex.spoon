@@ -32,6 +32,35 @@ Windows.Direction = Direction
 local pending_tab_replacement = nil ---@type {app_pid: number, frame: table, space: number, col: number, row: number}|nil
 local pending_tab_timer = nil ---@type hs.timer|nil
 
+---@param a table frame with x, y, w, h
+---@param b table frame with x, y, w, h
+local function framesEqual(a, b)
+    return a.x == b.x and a.y == b.y and a.w == b.w and a.h == b.h
+end
+
+---Find a tracked window in the given space from the same app (by PID) at the
+---same frame. Returns the window, column, and row if found.
+---@param space Space
+---@param pid number application PID
+---@param frame table frame with x, y, w, h
+---@return Window|nil window, number|nil col, number|nil row
+local function findTrackedByPidAndFrame(space, pid, frame)
+    local columns = codex.state.windowList(space)
+    for col = 1, #columns do
+        local rows = codex.state.windowList(space, col)
+        if rows then
+            for row = 1, #rows do
+                local tracked = rows[row]
+                local tracked_app = tracked:application()
+                if tracked_app and tracked_app:pid() == pid and framesEqual(tracked:frame(), frame) then
+                    return tracked, col, row
+                end
+            end
+        end
+    end
+    return nil
+end
+
 ---initialize module with reference to Codex
 ---@param spoon Codex
 function Windows.init(spoon)
@@ -163,29 +192,11 @@ function Windows.addWindow(add_window)
     if add_window:tabCount() > 1 then
         local app = add_window:application()
         if app then
-            local new_frame = add_window:frame()
-            local new_pid = app:pid()
             local space = Spaces.windowSpaces(add_window)[1]
-            if space then
-                local columns = codex.state.windowList(space)
-                for col = 1, #columns do
-                    local rows = codex.state.windowList(space, col)
-                    if rows then
-                        for row = 1, #rows do
-                            local tracked = rows[row]
-                            local tracked_app = tracked:application()
-                            if tracked_app and tracked_app:pid() == new_pid then
-                                local tf = tracked:frame()
-                                if tf.x == new_frame.x and tf.y == new_frame.y
-                                    and tf.w == new_frame.w and tf.h == new_frame.h then
-                                    codex.logger.df("ignoring duplicate tab window: [%s] tabCount=%d",
-                                        add_window:title(), add_window:tabCount())
-                                    return
-                                end
-                            end
-                        end
-                    end
-                end
+            if space and findTrackedByPidAndFrame(space, app:pid(), add_window:frame()) then
+                codex.logger.df("ignoring duplicate tab window: [%s] tabCount=%d",
+                    add_window:title(), add_window:tabCount())
+                return
             end
             codex.logger.df("allowing active tab window: [%s] tabCount=%d",
                 add_window:title(), add_window:tabCount())
@@ -212,11 +223,9 @@ function Windows.addWindow(add_window)
     local app = add_window:application()
     if pending_tab_replacement and app then
         local ptr = pending_tab_replacement
-        local f = add_window:frame()
         if ptr.app_pid == app:pid()
             and ptr.space == space
-            and ptr.frame.x == f.x and ptr.frame.y == f.y
-            and ptr.frame.w == f.w and ptr.frame.h == f.h then
+            and framesEqual(ptr.frame, add_window:frame()) then
             -- Consume the pending replacement
             if pending_tab_timer then pending_tab_timer:stop() end
             pending_tab_replacement = nil
@@ -328,46 +337,25 @@ end
 function Windows.replaceTabWindow(new_window)
     local app = new_window:application()
     if not app then return nil end
-    local new_frame = new_window:frame()
-    local new_pid = app:pid()
 
-    -- Search all tracked windows for one from the same app at the same frame
     local space = Spaces.windowSpaces(new_window)[1]
     if not space then return nil end
 
-    local columns = codex.state.windowList(space)
-    if not columns then return nil end
+    local old_window, col, row = findTrackedByPidAndFrame(space, app:pid(), new_window:frame())
+    if not old_window then return nil end
 
-    for col = 1, #columns do
-        local rows = codex.state.windowList(space, col)
-        if rows then
-            for row = 1, #rows do
-                local old_window = rows[row]
-                local old_app = old_window:application()
-                if old_app and old_app:pid() == new_pid then
-                    local old_frame = old_window:frame()
-                    if old_frame.x == new_frame.x and old_frame.y == new_frame.y
-                        and old_frame.w == new_frame.w and old_frame.h == new_frame.h then
-                        -- Found a match — swap in-place
-                        codex.state.uiWatcherDelete(old_window:id())
-                        codex.state.windowList(space, col)[row] = new_window
-                        codex.state.uiWatcherCreate(new_window)
-                        -- Clear stale x-position cache
-                        codex.state.xPositions(space)[old_window:id()] = nil
-                        -- Update prev_focused if it was the old window
-                        if codex.state.prev_focused_window == old_window then
-                            codex.state.prev_focused_window = new_window
-                        end
-                        codex.logger.df("tab replace: [%s]:%d -> [%s]:%d at col %d",
-                            old_window:title(), old_window:id(),
-                            new_window:title(), new_window:id(), col)
-                        return space
-                    end
-                end
-            end
-        end
+    -- Swap in-place
+    codex.state.uiWatcherDelete(old_window:id())
+    codex.state.windowList(space, col)[row] = new_window
+    codex.state.uiWatcherCreate(new_window)
+    codex.state.xPositions(space)[old_window:id()] = nil
+    if codex.state.prev_focused_window == old_window then
+        codex.state.prev_focused_window = new_window
     end
-    return nil
+    codex.logger.df("tab replace: [%s]:%d -> [%s]:%d at col %d",
+        old_window:title(), old_window:id(),
+        new_window:title(), new_window:id(), col)
+    return space
 end
 
 ---Get the index of the focused window, handling tab switches transparently.
@@ -389,7 +377,18 @@ function Windows.getFocusedIndex()
         end
     end
     if not focused_index then
-        codex.logger.e("focused index not found")
+        -- Window isn't tracked and no tab replacement found — try adding it.
+        -- This handles the case where a tab is closed: the tracked window is
+        -- destroyed, the app switches to another tab whose window was never
+        -- tracked, and no windowVisible event fires for it.
+        local space = Windows.addWindow(focused_window)
+        if space then
+            codex:tileSpace(space)
+            focused_index = codex.state.windowIndex(focused_window)
+        end
+    end
+    if not focused_index then
+        codex.logger.d("focused index not found")
     end
     return focused_window, focused_index
 end

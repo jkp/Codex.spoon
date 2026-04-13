@@ -89,10 +89,15 @@ function Events.windowEventHandler(window, event, self)
             self.logger.df("ignoring already focused window: [%s]: %d", window:title(), window:id())
             return
         end
-        -- If the focused window isn't tracked, it may be a tab switch —
-        -- try to replace the old tab in-place before updating focus state.
+        -- If the focused window isn't tracked, it may be a tab switch or a
+        -- tab close. Try replacing the old tab in-place first; if that fails,
+        -- add the window (handles the case where the tracked tab was destroyed
+        -- and the app switched to an untracked tab).
         if not self.state.windowIndex(window) and not self.floating.isFloating(window) then
             space = self.windows.replaceTabWindow(window)
+            if not space then
+                space = self.windows.addWindow(window)
+            end
         end
         self.state.prev_prev_focused_window = self.state.prev_focused_window -- for sticky pair direction
         self.state.prev_focused_window = window -- for addWindow()
