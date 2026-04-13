@@ -25,6 +25,13 @@ local Direction <const> = {
 }
 Windows.Direction = Direction
 
+-- Track recently removed windows for tab-switch detection.
+-- When a tabbed app switches tabs, the old tab fires windowNotVisible and the
+-- new tab fires windowVisible. We remember the old tab's position so the new
+-- tab can take its place instead of being inserted at a new column.
+local pending_tab_replacement = nil ---@type {app_pid: number, frame: table, space: number, col: number, row: number}|nil
+local pending_tab_timer = nil ---@type hs.timer|nil
+
 ---initialize module with reference to Codex
 ---@param spoon Codex
 function Windows.init(spoon)
@@ -147,21 +154,42 @@ function Windows.addWindow(add_window)
     -- don't add windows that are parked by virtual workspaces
     if add_window:id() and codex.state.isHidden(add_window:id()) then return end
 
-    -- A window with no tabs will have a tabCount of 0 or 1
-    -- A new tab for a window will have tabCount equal to the total number of tabs
-    -- All existing tabs in a window will have their tabCount reset to 0
-    -- We can't query whether an exiting hs.window is a tab or not after creation
-    local apple <const> = "com.apple"
-    local safari <const> = "com.apple.Safari"
-    if add_window:tabCount() > 1
-        and add_window:application():bundleID():sub(1, #apple) == apple
-        and add_window:application():bundleID():sub(1, #safari) ~= safari then
-        -- It's mostly built-in Apple apps like Finder and Terminal whose tabs
-        -- show up as separate windows. Third party apps like Microsoft Office
-        -- use tabs that are all contained within one window and tile fine.
-        hs.notify.show("Codex", "Windows with tabs are not supported!",
-            "See https://github.com/jkp/Codex.spoon/issues/39")
-        return
+    -- Apps using macOS native tabbing (Ghostty, Terminal, Finder, etc.) create
+    -- a separate NSWindow per tab, all sharing the same frame. We must manage
+    -- exactly one window per tab group position. When tabCount > 1, check if
+    -- there's already a tracked window from the same app at the same frame —
+    -- if so, this is a duplicate tab window and should be skipped. If not,
+    -- this is the first/active tab and should be managed.
+    if add_window:tabCount() > 1 then
+        local app = add_window:application()
+        if app then
+            local new_frame = add_window:frame()
+            local new_pid = app:pid()
+            local space = Spaces.windowSpaces(add_window)[1]
+            if space then
+                local columns = codex.state.windowList(space)
+                for col = 1, #columns do
+                    local rows = codex.state.windowList(space, col)
+                    if rows then
+                        for row = 1, #rows do
+                            local tracked = rows[row]
+                            local tracked_app = tracked:application()
+                            if tracked_app and tracked_app:pid() == new_pid then
+                                local tf = tracked:frame()
+                                if tf.x == new_frame.x and tf.y == new_frame.y
+                                    and tf.w == new_frame.w and tf.h == new_frame.h then
+                                    codex.logger.df("ignoring duplicate tab window: [%s] tabCount=%d",
+                                        add_window:title(), add_window:tabCount())
+                                    return
+                                end
+                            end
+                        end
+                    end
+                end
+            end
+            codex.logger.df("allowing active tab window: [%s] tabCount=%d",
+                add_window:title(), add_window:tabCount())
+        end
     end
 
     -- ignore windows that have a zoom button, but are not maximizable
@@ -177,6 +205,31 @@ function Windows.addWindow(add_window)
     if not space then
         codex.logger.e("add window does not have a space")
         return
+    end
+
+    -- Check for tab switch: if a window from the same app was just removed at
+    -- the same frame, this is a tab switch — slot into the old position.
+    local app = add_window:application()
+    if pending_tab_replacement and app then
+        local ptr = pending_tab_replacement
+        local f = add_window:frame()
+        if ptr.app_pid == app:pid()
+            and ptr.space == space
+            and ptr.frame.x == f.x and ptr.frame.y == f.y
+            and ptr.frame.w == f.w and ptr.frame.h == f.h then
+            -- Consume the pending replacement
+            if pending_tab_timer then pending_tab_timer:stop() end
+            pending_tab_replacement = nil
+            pending_tab_timer = nil
+
+            -- Clamp col in case the layout shifted between remove and add
+            local columns = codex.state.windowList(space)
+            local col = math.min(ptr.col, #columns + 1)
+            table.insert(codex.state.windowList(space), col, { add_window })
+            codex.state.uiWatcherCreate(add_window)
+            codex.logger.df("tab switch: placed [%s] at col %d", add_window:title(), col)
+            return space
+        end
     end
 
     -- find where to insert window
@@ -223,6 +276,25 @@ function Windows.removeWindow(remove_window, skip_new_window_focus)
         return
     end
 
+    -- Record this removal as a potential tab switch so addWindow can reuse
+    -- the position if another window from the same app appears at the same frame.
+    local app = remove_window:application()
+    if app then
+        local frame = remove_window:frame()
+        pending_tab_replacement = {
+            app_pid = app:pid(),
+            frame = { x = frame.x, y = frame.y, w = frame.w, h = frame.h },
+            space = remove_index.space,
+            col = remove_index.col,
+            row = remove_index.row,
+        }
+        if pending_tab_timer then pending_tab_timer:stop() end
+        pending_tab_timer = Timer.doAfter(1.0, function()
+            pending_tab_replacement = nil
+            pending_tab_timer = nil
+        end)
+    end
+
     if not skip_new_window_focus then -- find nearby window to focus
         for _, direction in ipairs({
             Direction.DOWN, Direction.UP, Direction.LEFT, Direction.RIGHT,
@@ -248,26 +320,90 @@ function Windows.removeWindow(remove_window, skip_new_window_focus)
     return remove_index.space -- return space for removed window
 end
 
+---Replace a tracked window with a new window from the same app at the same
+---frame. Used when a tab switch causes the focused window to change to an
+---untracked NSWindow. Returns the space if a replacement was made, nil otherwise.
+---@param new_window Window the newly focused, untracked window
+---@return Space|nil
+function Windows.replaceTabWindow(new_window)
+    local app = new_window:application()
+    if not app then return nil end
+    local new_frame = new_window:frame()
+    local new_pid = app:pid()
+
+    -- Search all tracked windows for one from the same app at the same frame
+    local space = Spaces.windowSpaces(new_window)[1]
+    if not space then return nil end
+
+    local columns = codex.state.windowList(space)
+    if not columns then return nil end
+
+    for col = 1, #columns do
+        local rows = codex.state.windowList(space, col)
+        if rows then
+            for row = 1, #rows do
+                local old_window = rows[row]
+                local old_app = old_window:application()
+                if old_app and old_app:pid() == new_pid then
+                    local old_frame = old_window:frame()
+                    if old_frame.x == new_frame.x and old_frame.y == new_frame.y
+                        and old_frame.w == new_frame.w and old_frame.h == new_frame.h then
+                        -- Found a match — swap in-place
+                        codex.state.uiWatcherDelete(old_window:id())
+                        codex.state.windowList(space, col)[row] = new_window
+                        codex.state.uiWatcherCreate(new_window)
+                        -- Clear stale x-position cache
+                        codex.state.xPositions(space)[old_window:id()] = nil
+                        -- Update prev_focused if it was the old window
+                        if codex.state.prev_focused_window == old_window then
+                            codex.state.prev_focused_window = new_window
+                        end
+                        codex.logger.df("tab replace: [%s]:%d -> [%s]:%d at col %d",
+                            old_window:title(), old_window:id(),
+                            new_window:title(), new_window:id(), col)
+                        return space
+                    end
+                end
+            end
+        end
+    end
+    return nil
+end
+
+---Get the index of the focused window, handling tab switches transparently.
+---When the focused window isn't tracked, attempts replaceTabWindow to swap
+---it into the position of a same-app window at the same frame.
+---@return Window|nil focused_window
+---@return Index|nil focused_index
+function Windows.getFocusedIndex()
+    local focused_window = Window.focusedWindow()
+    if not focused_window then
+        codex.logger.d("focused window not found")
+        return nil, nil
+    end
+    local focused_index = codex.state.windowIndex(focused_window)
+    if not focused_index then
+        -- May be an intra-app tab switch (no windowFocused event fires)
+        if Windows.replaceTabWindow(focused_window) then
+            focused_index = codex.state.windowIndex(focused_window)
+        end
+    end
+    if not focused_index then
+        codex.logger.e("focused index not found")
+    end
+    return focused_window, focused_index
+end
+
 ---move focus to a new window next to the currently focused window
 ---@param direction Direction use either Direction UP, DOWN, LEFT, or RIGHT
 ---@param focused_index Index index of focused window within the windowList
 function Windows.focusWindow(direction, focused_index)
     if not focused_index then
-        -- get current focused window
-        local focused_window = Window.focusedWindow()
-        if not focused_window then
-            codex.logger.d("focused window not found")
-            return
-        end
-
-        -- get focused window index
-        focused_index = codex.state.windowIndex(focused_window)
+        local _
+        _, focused_index = Windows.getFocusedIndex()
     end
 
-    if not focused_index then
-        codex.logger.e("focused index not found")
-        return
-    end
+    if not focused_index then return end
 
     -- get new focused window
     local new_focused_window = nil
@@ -345,17 +481,8 @@ end
 ---swap positions within the column
 ---@param direction Direction use Direction LEFT, RIGHT, UP, or DOWN
 function Windows.swapWindows(direction)
-    local focused_window = Window.focusedWindow()
-    if not focused_window then
-        codex.logger.d("focused window not found")
-        return
-    end
-
-    local focused_index = codex.state.windowIndex(focused_window)
-    if not focused_index then
-        codex.logger.e("focused index not found")
-        return
-    end
+    local focused_window, focused_index = Windows.getFocusedIndex()
+    if not focused_index then return end
 
     if direction == Direction.LEFT or direction == Direction.RIGHT then
         local columns = codex.state.windowList(focused_index.space)
@@ -593,17 +720,8 @@ end
 ---take the current focused window and move it into the bottom of
 ---the column to the left
 function Windows.slurpWindow()
-    -- get current focused window
-    local focused_window = Window.focusedWindow()
-    if not focused_window then
-        codex.logger.d("focused window not found")
-        return
-    end
-
-    -- get window index
-    local focused_index = codex.state.windowIndex(focused_window)
+    local focused_window, focused_index = Windows.getFocusedIndex()
     if not focused_index then
-        codex.logger.e("focused index not found")
         return
     end
 
@@ -637,17 +755,8 @@ end
 ---remove focused window from it's current column and place into
 ---a new column to the right
 function Windows.barfWindow()
-    -- get current focused window
-    local focused_window = Window.focusedWindow()
-    if not focused_window then
-        codex.logger.d("focused window not found")
-        return
-    end
-
-    -- get window index
-    local focused_index = codex.state.windowIndex(focused_window)
+    local focused_window, focused_index = Windows.getFocusedIndex()
     if not focused_index then
-        codex.logger.e("focused index not found")
         return
     end
 
