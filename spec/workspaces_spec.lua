@@ -1883,6 +1883,181 @@ describe("Codex.workspaces", function()
         end)
     end)
 
+    describe("mark", function()
+        it("should save focused window and workspace on setMark", function()
+            local w1 = makeWin(1, "W1")
+            all_filter_windows = { w1 }
+            focused_window = w1
+            setupStandard()
+
+            Workspaces.setMark()
+
+            -- Verify mark was set by jumping to it (same workspace, focuses w1)
+            local w2 = makeWin(2, "W2")
+            Workspaces.onWindowCreated(w2)
+            focused_window = w2
+            local focus_spy = spy.on(w1, "focus")
+            Workspaces.jumpToMark()
+            assert.spy(focus_spy).was.called()
+        end)
+
+        it("should no-op jumpToMark when no mark set", function()
+            setupStandard()
+
+            -- Should not error or switch workspace
+            Workspaces.jumpToMark()
+            assert.are.equal("personal", Workspaces.currentSpace())
+        end)
+
+        it("should focus marked window on same workspace", function()
+            local w1 = makeWin(1, "W1")
+            local w2 = makeWin(2, "W2")
+            all_filter_windows = { w1, w2 }
+            focused_window = w1
+            setupStandard()
+
+            Workspaces.setMark()
+
+            -- Move focus to w2
+            focused_window = w2
+            local focus_spy = spy.on(w1, "focus")
+            Workspaces.jumpToMark()
+
+            assert.spy(focus_spy).was.called()
+            assert.are.equal("personal", Workspaces.currentSpace())
+        end)
+
+        it("should switch workspace when mark is cross-workspace", function()
+            local w1 = makeWin(1, "W1")
+            local w2 = makeWin(2, "W2", "Browser", 200)
+            all_filter_windows = { w1, w2 }
+            focused_window = w1
+            setupStandard({ appRules = { Browser = "work" } })
+
+            -- Mark on personal
+            Workspaces.setMark()
+
+            -- Switch to work
+            Workspaces.switchTo("work")
+            assert.are.equal("work", Workspaces.currentSpace())
+
+            -- Simulate focus on work window
+            focused_window = w2
+
+            -- Jump to mark should switch back to personal
+            Workspaces.jumpToMark()
+            assert.are.equal("personal", Workspaces.currentSpace())
+        end)
+
+        it("should toggle back when already at mark", function()
+            local w1 = makeWin(1, "W1")
+            local w2 = makeWin(2, "W2", "Browser", 200)
+            all_filter_windows = { w1, w2 }
+            setupStandard({ appRules = { Browser = "work" } })
+
+            -- Mark w1 on personal
+            focused_window = w1
+            Workspaces.setMark()
+
+            -- Switch to work
+            Workspaces.switchTo("work")
+            focused_window = w2
+
+            -- Jump to mark (goes to personal/w1)
+            Workspaces.jumpToMark()
+            assert.are.equal("personal", Workspaces.currentSpace())
+
+            -- Jump again while AT the mark → should go back to work
+            focused_window = w1
+            Workspaces.jumpToMark()
+            assert.are.equal("work", Workspaces.currentSpace())
+        end)
+
+        it("should update mark_return each jump", function()
+            local w1 = makeWin(1, "W1")
+            local w2 = makeWin(2, "W2")
+            local w3 = makeWin(3, "W3")
+            all_filter_windows = { w1, w2, w3 }
+            setupStandard()
+
+            -- Mark w1
+            focused_window = w1
+            Workspaces.setMark()
+
+            -- Jump from w2 → mark (w1). mark_return = w2
+            focused_window = w2
+            Workspaces.jumpToMark()
+
+            -- Toggle back from w1 → should go to w2 (mark_return)
+            focused_window = w1
+            local focus_spy_w2 = spy.on(w2, "focus")
+            Workspaces.jumpToMark()
+            assert.spy(focus_spy_w2).was.called()
+
+            -- Now jump from w3 → mark. mark_return should be w3 now
+            focused_window = w3
+            Workspaces.jumpToMark()
+
+            focused_window = w1
+            local focus_spy_w3 = spy.on(w3, "focus")
+            Workspaces.jumpToMark()
+            assert.spy(focus_spy_w3).was.called()
+        end)
+
+        it("should clear mark when marked window is destroyed", function()
+            local w1 = makeWin(1, "W1")
+            all_filter_windows = { w1 }
+            focused_window = w1
+            setupStandard()
+
+            Workspaces.setMark()
+            Workspaces.onWindowDestroyed(w1)
+
+            -- jumpToMark should be no-op now
+            Workspaces.jumpToMark()
+            assert.are.equal("personal", Workspaces.currentSpace())
+        end)
+
+        it("should clear mark_return when return window is destroyed", function()
+            local w1 = makeWin(1, "W1")
+            local w2 = makeWin(2, "W2", "Browser", 200)
+            all_filter_windows = { w1, w2 }
+            setupStandard({ appRules = { Browser = "work" } })
+
+            -- Mark w1 on personal
+            focused_window = w1
+            Workspaces.setMark()
+
+            -- Switch to work, then jump to mark (saves w2/work as mark_return)
+            Workspaces.switchTo("work")
+            focused_window = w2
+            Workspaces.jumpToMark()
+            assert.are.equal("personal", Workspaces.currentSpace())
+
+            -- Destroy w2 (the mark_return window)
+            Workspaces.onWindowDestroyed(w2)
+
+            -- Toggle should NOT try to go back to destroyed window
+            -- Should be no-op (at mark, but mark_return is cleared)
+            focused_window = w1
+            Workspaces.jumpToMark()
+            -- Should stay on personal since mark_return is gone
+            assert.are.equal("personal", Workspaces.currentSpace())
+        end)
+
+        it("should no-op setMark when no focused window", function()
+            setupStandard()
+            focused_window = nil
+
+            -- Should not error
+            Workspaces.setMark()
+
+            -- jumpToMark should still be no-op
+            Workspaces.jumpToMark()
+            assert.are.equal("personal", Workspaces.currentSpace())
+        end)
+    end)
+
     describe("app-centric config", function()
         -- Helper: set up with app-centric config
         local function setupApps(opts)

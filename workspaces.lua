@@ -40,6 +40,8 @@ local focus_follows = {} -- appName -> true (apps that trigger workspace switch 
 local jump_targets = {}  -- category -> { workspace -> appName | {app,title,launch} }
 local jump_window = {}   -- "category:workspace" -> window ref (lazy-validated cache)
 local prev_jump = nil    -- { workspace = name, window_id = id } for toggle-jump
+local mark = nil         -- { workspace, window_id } — user-set anchor
+local mark_return = nil  -- { workspace, window_id } — auto-saved on jump-to-mark
 local app_jump_from = {} -- workspace_name -> window_id (for app-jump toggle)
 
 ---user callback, called with workspace name after switching
@@ -1024,6 +1026,9 @@ function Workspaces.onWindowDestroyed(win)
     if prev_jump and prev_jump.window_id == id then
         prev_jump = nil
     end
+    -- Clear mark / mark_return if they pointed to this window
+    if mark and mark.window_id == id then mark = nil end
+    if mark_return and mark_return.window_id == id then mark_return = nil end
     -- Clear app_jump_from if it pointed to this window
     if wsName and app_jump_from[wsName] == id then
         app_jump_from[wsName] = nil
@@ -1115,6 +1120,12 @@ function Workspaces.dump()
         end
         table.insert(output, string.format("  %s%s: %s", name, marker, table.concat(wins, ", ")))
     end
+    if mark then
+        table.insert(output, string.format("  mark: %s/%d", mark.workspace, mark.window_id))
+    end
+    if mark_return then
+        table.insert(output, string.format("  mark_return: %s/%d", mark_return.workspace, mark_return.window_id))
+    end
     codex.logger.i(table.concat(output, "\n"))
 end
 
@@ -1205,6 +1216,60 @@ function Workspaces.jumpToApp(category)
         hs.task.new(launchCmd[1], nil, table.move(launchCmd, 2, #launchCmd, 1, {})):start()
     else
         hs.application.launchOrFocus(appName)
+    end
+end
+
+---set the current focused window as a persistent mark
+function Workspaces.setMark()
+    local focused = Window.focusedWindow()
+    if not focused then return end
+    local id = focused:id()
+    if not id then return end
+    mark = { workspace = current, window_id = id }
+end
+
+---jump to the marked window, or toggle back if already there
+function Workspaces.jumpToMark()
+    if not mark then return end
+
+    local focused = Window.focusedWindow()
+    local fid = focused and focused:id()
+
+    -- At the mark? Toggle back to mark_return
+    if fid == mark.window_id then
+        if not mark_return then return end
+        local target_ws = mark_return.workspace
+        local target_wid = mark_return.window_id
+        -- Save current as new mark_return before jumping back
+        mark_return = { workspace = current, window_id = fid }
+        if target_ws ~= current then
+            if target_wid then ws_focused[target_ws] = target_wid end
+            _doSwitch(target_ws)
+        else
+            if target_wid and ws_windows[current] and ws_windows[current][target_wid] then
+                local win = Window.get(target_wid)
+                if win then win:focus() end
+            end
+        end
+        return
+    end
+
+    -- Save current position as mark_return
+    if fid then
+        mark_return = { workspace = current, window_id = fid }
+    end
+
+    -- Jump to mark
+    local target_ws = mark.workspace
+    local target_wid = mark.window_id
+    if target_ws ~= current then
+        if target_wid then ws_focused[target_ws] = target_wid end
+        _doSwitch(target_ws)
+    else
+        if target_wid and ws_windows[current] and ws_windows[current][target_wid] then
+            local win = Window.get(target_wid)
+            if win then win:focus() end
+        end
     end
 end
 
