@@ -32,8 +32,8 @@ local screen_changed = false  -- set by screen watcher, forces retile on next sw
 local ws_pending = {}         -- name -> { {id=number, win=window_ref}, ... }
 local screen_watcher = nil    -- hs.screen.watcher instance
 local ws_layout = {}    -- name -> "scrolling" | "unmanaged"
-local ws_names = {}     -- ordered list of workspace names (for prev/next cycling)
 local ws_columns = {}   -- name -> ordered list of jump categories (e.g., {"browser","terminal"})
+local ws_names = {}     -- ordered list of workspace names (for prev/next cycling)
 local ws_filter = nil    -- separate window filter for workspace lifecycle hooks
 local toggle_back = false -- when true, pressing the same switch/jump key toggles back
 local focus_follows = {} -- appName -> true (apps that trigger workspace switch on focus)
@@ -1217,6 +1217,74 @@ function Workspaces.jumpToApp(category)
     else
         hs.application.launchOrFocus(appName)
     end
+end
+
+---adopt the focused window into the current workspace (rescue orphans)
+function Workspaces.rescueWindow()
+    local win = Window.focusedWindow()
+    if not win then codex.logger.d("rescueWindow: no focused window"); return end
+    local id = win:id()
+    if not id then codex.logger.d("rescueWindow: no window id"); return end
+
+    -- Constrain the window frame to the canvas so tileSpace doesn't overflow
+    local function constrainToCanvas()
+        local screen = Screen.mainScreen()
+        if not screen then return end
+        local canvas = codex.windows.getCanvas(screen)
+        local frame = win:frame()
+        if frame.w > canvas.w then frame.w = canvas.w end
+        if frame.h > canvas.h then frame.h = canvas.h end
+        codex.windows.moveWindow(win, frame)
+    end
+
+    local existing = win_ws[id]
+    if existing == current then
+        -- Already on this workspace — but maybe not in tiling state.
+        -- Ensure it's not hidden and try to add it.
+        codex.state.setHidden(id, nil)
+        local screen = Screen.mainScreen()
+        if screen then
+            local space = Spaces.activeSpaces()[screen:getUUID()]
+            if space and not codex.state.windowIndex(win) then
+                constrainToCanvas()
+                codex.windows.addWindow(win)
+                codex:tileSpace(space)
+            end
+        end
+        codex.logger.df("rescueWindow: re-added %d to current workspace %s", id, current)
+        return
+    end
+
+    if existing then
+        -- Tracked on a different workspace — move it here
+        constrainToCanvas()
+        Workspaces.moveWindowTo(current)
+        codex.logger.df("rescueWindow: moved %d from %s to %s", id, existing, current)
+        return
+    end
+
+    -- Completely untracked — adopt into current workspace
+    local app = win:application()
+    if app then win_pid[id] = app:pid() end
+    ws_windows[current] = ws_windows[current] or {}
+    ws_windows[current][id] = true
+    win_ws[id] = current
+    codex.state.setHidden(id, nil)
+
+    if ws_layout[current] == "unmanaged" then
+        codex.state.is_floating[id] = true
+    end
+
+    local screen = Screen.mainScreen()
+    if screen then
+        local space = Spaces.activeSpaces()[screen:getUUID()]
+        if space then
+            constrainToCanvas()
+            codex.windows.addWindow(win)
+            codex:tileSpace(space)
+        end
+    end
+    codex.logger.df("rescueWindow: adopted untracked %d into %s", id, current)
 end
 
 ---set the current focused window as a persistent mark
