@@ -98,6 +98,16 @@ function Events.windowEventHandler(window, event, self)
             if not space then
                 space = self.windows.addWindow(window)
             end
+            -- addWindow may fail if the window has no space yet — retry
+            if not space and not self.state.windowIndex(window) then
+                local w, s = window, self
+                Timer.doAfter(Window.animationDuration, function()
+                    if not s.state.windowIndex(w) then
+                        local sp = s.windows.addWindow(w)
+                        if sp then s:tileSpace(sp) end
+                    end
+                end)
+            end
         end
         self.state.prev_prev_focused_window = self.state.prev_focused_window -- for sticky pair direction
         self.state.prev_focused_window = window -- for addWindow()
