@@ -25,12 +25,10 @@ local Direction <const> = {
 }
 Windows.Direction = Direction
 
--- Track recently removed windows for tab-switch detection.
--- When a tabbed app switches tabs, the old tab fires windowNotVisible and the
--- new tab fires windowVisible. We remember the old tab's position so the new
--- tab can take its place instead of being inserted at a new column.
-local pending_tab_replacement = nil ---@type {app_pid: number, frame: table, space: number, col: number, row: number}|nil
-local pending_tab_timer = nil ---@type hs.timer|nil
+-- Track removed tab positions per app PID so the next window from that app can
+-- take the old position. Keyed by PID, consumed when matched in addWindow.
+-- No timer — entries persist until consumed or overwritten by a newer removal.
+local pending_tab_replacements = {} ---@type table<number, {frame: table, space: number, col: number, row: number}>
 
 ---@param a table frame with x, y, w, h
 ---@param b table frame with x, y, w, h
@@ -190,6 +188,13 @@ function Windows.addWindow(add_window)
     -- if so, this is a duplicate tab window and should be skipped. If not,
     -- this is the first/active tab and should be managed.
     if add_window:tabCount() > 1 then
+        -- Phantom windows with empty titles appear transiently during tab
+        -- operations — never track them.
+        local title = add_window:title()
+        if not title or title == "" then
+            codex.logger.df("ignoring phantom tab window: tabCount=%d", add_window:tabCount())
+            return
+        end
         local app = add_window:application()
         if app then
             local space = Spaces.windowSpaces(add_window)[1]
@@ -218,18 +223,14 @@ function Windows.addWindow(add_window)
         return
     end
 
-    -- Check for tab switch: if a window from the same app was just removed at
-    -- the same frame, this is a tab switch — slot into the old position.
+    -- Check for tab switch/close: if a window from the same app was previously
+    -- removed, this may be its replacement — slot into the old position.
     local app = add_window:application()
-    if pending_tab_replacement and app then
-        local ptr = pending_tab_replacement
-        if ptr.app_pid == app:pid()
-            and ptr.space == space
-            and framesEqual(ptr.frame, add_window:frame()) then
-            -- Consume the pending replacement
-            if pending_tab_timer then pending_tab_timer:stop() end
-            pending_tab_replacement = nil
-            pending_tab_timer = nil
+    if app then
+        local pid = app:pid()
+        local ptr = pending_tab_replacements[pid]
+        if ptr and ptr.space == space then
+            pending_tab_replacements[pid] = nil
 
             -- Clamp col in case the layout shifted between remove and add
             local columns = codex.state.windowList(space)
@@ -288,20 +289,16 @@ function Windows.removeWindow(remove_window, skip_new_window_focus)
     -- Record this removal as a potential tab switch so addWindow can reuse
     -- the position if another window from the same app appears at the same frame.
     local app = remove_window:application()
-    if app then
-        local frame = remove_window:frame()
-        pending_tab_replacement = {
-            app_pid = app:pid(),
-            frame = { x = frame.x, y = frame.y, w = frame.w, h = frame.h },
+    -- Only record the position for windows with a real title — phantom windows
+    -- (empty title, briefly visible during tab operations) would corrupt the
+    -- stored position if we recorded them.
+    local title = remove_window:title()
+    if app and title and title ~= "" then
+        pending_tab_replacements[app:pid()] = {
             space = remove_index.space,
             col = remove_index.col,
             row = remove_index.row,
         }
-        if pending_tab_timer then pending_tab_timer:stop() end
-        pending_tab_timer = Timer.doAfter(1.0, function()
-            pending_tab_replacement = nil
-            pending_tab_timer = nil
-        end)
     end
 
     if not skip_new_window_focus then -- find nearby window to focus
