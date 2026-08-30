@@ -1010,6 +1010,29 @@ describe("Codex.workspaces", function()
             assert.is_true(work_ids[2] == true)
         end)
 
+        it("should tile a window created for an inactive workspace after switch", function()
+            local w1 = makeWin(1, "W1", "Terminal", 100)
+            all_filter_windows = { w1 }
+            focused_window = w1
+            setupStandard({ appRules = { Browser = "work" } })
+            State.windowList(1)[1] = { w1 }
+
+            -- A Browser window launches while we are on personal: it belongs to
+            -- work, so onWindowCreated parks it off-screen and marks it hidden.
+            local w2 = makeWin(2, "W2", "Browser", 200)
+            all_filter_windows = { w1, w2 }
+            Workspaces.onWindowCreated(w2)
+            assert.is_true(State.isHidden(2))
+
+            -- Switching to work must adopt it into the tiling state. It was
+            -- never tiled, so no snapshot covers it — only ws_pending can.
+            local add_spy = spy.on(mock_codex.windows, "addWindow")
+            Workspaces.switchTo("work")
+
+            assert.spy(add_spy).was.called_with(w2)
+            assert.is_false(State.isHidden(2))
+        end)
+
         it("should add all pending windows when multiple moved", function()
             local w1 = makeWin(1, "W1", "App1", 100)
             local w2 = makeWin(2, "W2", "App2", 200)
