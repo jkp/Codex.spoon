@@ -89,9 +89,29 @@ function Events.windowEventHandler(window, event, self)
             self.logger.df("ignoring already focused window: [%s]: %d", window:title(), window:id())
             return
         end
+        -- If the focused window isn't tracked, it may be a tab switch or a
+        -- tab close. Try replacing the old tab in-place first; if that fails,
+        -- add the window (handles the case where the tracked tab was destroyed
+        -- and the app switched to an untracked tab).
+        if not self.state.windowIndex(window) and not self.floating.isFloating(window) then
+            space = self.windows.replaceTabWindow(window)
+            if not space then
+                space = self.windows.addWindow(window)
+            end
+            -- addWindow may fail if the window has no space yet — retry
+            if not space and not self.state.windowIndex(window) then
+                local w, s = window, self
+                Timer.doAfter(Window.animationDuration, function()
+                    if not s.state.windowIndex(w) then
+                        local sp = s.windows.addWindow(w)
+                        if sp then s:tileSpace(sp) end
+                    end
+                end)
+            end
+        end
         self.state.prev_prev_focused_window = self.state.prev_focused_window -- for sticky pair direction
         self.state.prev_focused_window = window -- for addWindow()
-        space = Spaces.windowSpaces(window)[1]
+        if not space then space = Spaces.windowSpaces(window)[1] end
     elseif event == "windowVisible" or event == "windowUnfullscreened" then
         space = self.windows.addWindow(window)
         if self.state.pending_window and window == self.state.pending_window then
@@ -195,17 +215,8 @@ function Events.swipeHandler(self)
             self.logger.df("new swipe: %d", id)
 
             -- use focused window for space to scroll windows
-            local focused_window = Window.focusedWindow()
-            if not focused_window then
-                self.logger.d("focused window not found")
-                return
-            end
-
-            local focused_index = self.state.windowIndex(focused_window)
-            if not focused_index then
-                self.logger.e("focused index not found")
-                return
-            end
+            local focused_window, focused_index = self.windows.getFocusedIndex()
+            if not focused_index then return end
 
             local screen = Screen(Spaces.spaceDisplay(focused_index.space))
             if not screen then
@@ -328,17 +339,8 @@ function Events.scrollHandler(self)
             if not scroll_coro then
                 self.logger.d("scroll window start")
 
-                local focused_window = Window.focusedWindow()
-                if not focused_window then
-                    self.logger.d("focused window not found")
-                    return delete_event
-                end
-
-                local focused_index = self.state.windowIndex(focused_window)
-                if not focused_index then
-                    self.logger.e("focused index not found")
-                    return delete_event
-                end
+                local focused_window, focused_index = self.windows.getFocusedIndex()
+                if not focused_index then return delete_event end
 
                 local screen = Screen(Spaces.spaceDisplay(focused_index.space))
                 if not screen then
@@ -374,13 +376,32 @@ function Events.start()
     local function _ms(t) return math.floor((hs.timer.absoluteTime() - t) / 1e6) end
 
     -- listen for window events
+    -- Retry loop to work around transient Hammerspoon window_filter bug where
+    -- global.active:deactivated() fails on stale state after hs.reload().
     local _t = hs.timer.absoluteTime()
-    codex.window_filter:subscribe({
+    local events_list = {
         WindowFilter.windowFocused, WindowFilter.windowVisible,
         WindowFilter.windowNotVisible, WindowFilter.windowFullscreened,
         WindowFilter.windowUnfullscreened, WindowFilter.windowDestroyed,
-    }, function(window, _, event) Events.windowEventHandler(window, event, codex) end)
-    print(string.format("[events.start] subscribe: %dms", _ms(_t)))
+    }
+    local handler = function(window, _, event) Events.windowEventHandler(window, event, codex) end
+    local max_retries = 5
+    local function trySubscribe(attempt)
+        local ok, err = pcall(function() codex.window_filter:subscribe(events_list, handler) end)
+        if ok then
+            print(string.format("[events.start] subscribe ok (attempt %d): %dms", attempt, _ms(_t)))
+            if attempt > 1 then
+                print("[events.start] late subscribe recovery — refreshing windows")
+                codex.windows.refreshWindows()
+            end
+        elseif attempt < max_retries then
+            print(string.format("[events.start] subscribe failed (attempt %d): %s", attempt, err))
+            Timer.doAfter(0.5, function() trySubscribe(attempt + 1) end)
+        else
+            print(string.format("[events.start] subscribe failed after %d attempts: %s", attempt, err))
+        end
+    end
+    trySubscribe(1)
 
     -- watch for external monitor plug / unplug
     _t = hs.timer.absoluteTime()

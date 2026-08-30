@@ -41,71 +41,69 @@ describe("Codex.windows", function()
             assert.is_not_nil(state.ui_watchers[101])
         end)
 
-        it("should skip Apple windows with tabs", function()
+        it("should add first tab window when no duplicate tracked", function()
             local win = mock_window(101, "Test Window", nil)
             win.tabCount = function() return 2 end
-            win.application = function() return { bundleID = function() return "com.apple.Terminal" end } end
 
             local space = Windows.addWindow(win)
+
+            local state = State.get()
+            assert.are.equal(1, space)
+            assert.is_not_nil(state.index_table[101])
+        end)
+
+        it("should skip duplicate tab window from same app at same frame", function()
+            local frame = { x = 0, y = 0, w = 100, h = 100 }
+            local win1 = mock_window(101, "Tab 1", frame, "Ghostty", 5000)
+            win1.tabCount = function() return 2 end
+            Windows.addWindow(win1)
+
+            local win2 = mock_window(102, "Tab 2", frame, "Ghostty", 5000)
+            win2.tabCount = function() return 2 end
+            local space = Windows.addWindow(win2)
 
             local state = State.get()
             assert.is_nil(space)
-            assert.is_nil(state.index_table[101])
-            assert.is_nil(state.ui_watchers[101])
+            assert.is_nil(state.index_table[102])
+            -- Original still tracked
+            assert.is_not_nil(state.index_table[101])
         end)
 
-        it("should add Finder window that reports tabcount of 1", function()
+        it("should add tab window from different app at same frame", function()
+            local frame = { x = 0, y = 0, w = 100, h = 100 }
+            local win1 = mock_window(101, "Tab 1", frame, "Ghostty", 5000)
+            win1.tabCount = function() return 2 end
+            Windows.addWindow(win1)
+
+            local win2 = mock_window(102, "Tab 1", frame, "Safari", 6000)
+            win2.tabCount = function() return 3 end
+            local space = Windows.addWindow(win2)
+
+            local state = State.get()
+            assert.are.equal(1, space)
+            assert.is_not_nil(state.index_table[102])
+        end)
+
+        it("should add window with tabCount of 1", function()
             local win = mock_window(101, "Test Window", nil)
             win.tabCount = function() return 1 end
-            win.application = function() return { bundleID = function() return "com.apple.finder" end } end
 
             local space = Windows.addWindow(win)
 
             local state = State.get()
             assert.are.equal(1, space)
-            assert.are.equal(1, #state.window_list[space])
-            assert.are.equal(1, #state.window_list[space][1])
-            assert.are.equal(win, state.window_list[space][1][1])
             assert.is_not_nil(state.index_table[101])
-            assert.are.equal(1, state.index_table[101].col)
-            assert.are.equal(1, state.index_table[101].row)
-            assert.is_not_nil(state.ui_watchers[101])
         end)
 
-        it("should add Safari windows with tabs", function()
+        it("should add window with tabCount of 0", function()
             local win = mock_window(101, "Test Window", nil)
-            win.tabCount = function() return 2 end
-            win.application = function() return { bundleID = function() return "com.apple.Safari" end } end
+            win.tabCount = function() return 0 end
 
             local space = Windows.addWindow(win)
 
             local state = State.get()
             assert.are.equal(1, space)
-            assert.are.equal(1, #state.window_list[space])
-            assert.are.equal(1, #state.window_list[space][1])
-            assert.are.equal(win, state.window_list[space][1][1])
             assert.is_not_nil(state.index_table[101])
-            assert.are.equal(1, state.index_table[101].col)
-            assert.are.equal(1, state.index_table[101].row)
-            assert.is_not_nil(state.ui_watchers[101])
-        end)
-
-        it("non-Apple apps with tabs can be added", function()
-            local win = mock_window(101, "Test Window", nil)
-            win.tabCount = function() return 2 end
-            win.application = function() return { bundleID = function() return "com.Microsoft.Word" end } end
-
-            local space = Windows.addWindow(win)
-
-            local state = State.get()
-            assert.are.equal(1, space)
-            assert.are.equal(1, #state.window_list[space])
-            assert.are.equal(1, #state.window_list[space][1])
-            assert.are.equal(win, state.window_list[space][1][1])
-            assert.is_not_nil(state.index_table[101])
-            assert.are.equal(1, state.index_table[101].col)
-            assert.are.equal(1, state.index_table[101].row)
-            assert.is_not_nil(state.ui_watchers[101])
         end)
     end)
 
@@ -135,6 +133,62 @@ describe("Codex.windows", function()
             assert.is_nil(state.window_list[space])
             assert.is_nil(state.index_table[101])
             assert.is_nil(state.ui_watchers[101])
+        end)
+    end)
+
+    describe("tab switch", function()
+        it("should replace window in-place when tab switches in same app", function()
+            -- Set up: three windows tiled left to right
+            local frame = { x = 200, y = 0, w = 100, h = 100 }
+            local win1 = mock_window(101, "Window 1", { x = 0, y = 0, w = 100, h = 100 })
+            local win2 = mock_window(102, "Tab 1", frame, "Ghostty", 5000)
+            local win3 = mock_window(103, "Window 3", { x = 400, y = 0, w = 100, h = 100 })
+            Windows.addWindow(win1)
+            Windows.addWindow(win2)
+            Windows.addWindow(win3)
+
+            local state = State.get()
+            assert.are.equal(win2, state.window_list[1][2][1]) -- win2 is in col 2
+
+            -- Simulate tab switch: old tab removed, new tab from same app at same frame
+            Windows.removeWindow(win2, true)
+            local win2b = mock_window(104, "Tab 2", frame, "Ghostty", 5000)
+            local space = Windows.addWindow(win2b)
+
+            state = State.get()
+            assert.are.equal(1, space)
+            assert.are.equal(3, #state.window_list[1])      -- still 3 columns
+            assert.are.equal(win1, state.window_list[1][1][1])  -- col 1 unchanged
+            assert.are.equal(win2b, state.window_list[1][2][1]) -- col 2 is new tab
+            assert.are.equal(win3, state.window_list[1][3][1])  -- col 3 unchanged
+        end)
+
+        it("should not replace when app differs", function()
+            local frame = { x = 200, y = 0, w = 100, h = 100 }
+            local win1 = mock_window(101, "Tab 1", frame, "Ghostty", 5000)
+            Windows.addWindow(win1)
+
+            Windows.removeWindow(win1, true)
+            -- Different app (different pid)
+            local win2 = mock_window(102, "Other App", frame, "Safari", 6000)
+            Windows.addWindow(win2)
+
+            local state = State.get()
+            -- Should still be added (just at normal position), not rejected
+            assert.is_not_nil(state.index_table[102])
+        end)
+
+        it("should not replace when frame differs", function()
+            local win1 = mock_window(101, "Tab 1", { x = 200, y = 0, w = 100, h = 100 }, "Ghostty", 5000)
+            Windows.addWindow(win1)
+
+            Windows.removeWindow(win1, true)
+            -- Same app but different frame
+            local win2 = mock_window(102, "Tab 2", { x = 300, y = 0, w = 100, h = 100 }, "Ghostty", 5000)
+            Windows.addWindow(win2)
+
+            local state = State.get()
+            assert.is_not_nil(state.index_table[102])
         end)
     end)
 

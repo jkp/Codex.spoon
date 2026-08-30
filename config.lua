@@ -94,4 +94,7 @@ Config.sticky_pairs = true ---@type boolean
 ---right-anchor the last column to eliminate dead space at the right edge
 Config.right_anchor_last = false ---@type boolean
 
+---swallow Cmd+H to prevent macOS app hiding (breaks virtual workspaces)
+Config.disable_app_hide = false ---@type boolean
+
 return Config

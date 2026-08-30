@@ -32,13 +32,16 @@ local screen_changed = false  -- set by screen watcher, forces retile on next sw
 local ws_pending = {}         -- name -> { {id=number, win=window_ref}, ... }
 local screen_watcher = nil    -- hs.screen.watcher instance
 local ws_layout = {}    -- name -> "scrolling" | "unmanaged"
+local ws_columns = {}   -- name -> ordered list of jump categories (e.g., {"browser","terminal"})
+local ws_names = {}     -- ordered list of workspace names (for prev/next cycling)
 local ws_filter = nil    -- separate window filter for workspace lifecycle hooks
 local toggle_back = false -- when true, pressing the same switch/jump key toggles back
-local focus_follows_off = {} -- appName -> true (apps that DON'T trigger workspace switch on focus)
+local focus_follows = {} -- appName -> true (apps that trigger workspace switch on focus)
 local jump_targets = {}  -- category -> { workspace -> appName | {app,title,launch} }
 local jump_window = {}   -- "category:workspace" -> window ref (lazy-validated cache)
 local prev_jump = nil    -- { workspace = name, window_id = id } for toggle-jump
-local app_jump_from = {} -- workspace_name -> window_id (for app-jump toggle)
+local mark = nil         -- { workspace, window_id } — user-set anchor
+local mark_return = nil  -- { workspace, window_id } — auto-saved on jump-to-mark
 
 ---user callback, called with workspace name after switching
 ---@type fun(name: string)|nil
@@ -160,6 +163,70 @@ local function _removePendingEntry(ws, id)
     if #p == 0 then ws_pending[ws] = nil end
 end
 
+---check if a window matches a jump target entry
+---@param win userdata hs.window
+---@param target string|table jump target (app name string or {app, title} table)
+---@return boolean
+local function _matchesTarget(win, target)
+    if type(target) == "string" then
+        local app = win:application()
+        if not app then return false end
+        return stripInvisible(app:title()) == target
+    end
+    if type(target) == "table" and target.title then
+        local title = win:title()
+        if title and title:match(target.title) then return true end
+    elseif type(target) == "table" and target.app then
+        local app = win:application()
+        if not app then return false end
+        return stripInvisible(app:title()) == target.app
+    end
+    return false
+end
+
+---reorder columns to match the workspace's column spec
+---matched columns come first (in spec order), then remaining columns in original order
+---@param window_list table array of columns (each column is an array of window refs)
+---@param workspace_name string workspace name
+---@return table reordered window_list
+local function _reorderColumns(window_list, workspace_name)
+    local columns = ws_columns[workspace_name]
+    if not columns or #columns == 0 then return window_list end
+
+    local result = {}
+    local used = {}  -- set of original column indices already placed
+
+    -- For each category in the spec, find the first matching column
+    for _, category in ipairs(columns) do
+        local targets = jump_targets[category]
+        local target = targets and targets[workspace_name]
+        if target then
+            for col_idx, col in ipairs(window_list) do
+                if not used[col_idx] then
+                    -- Check if any window in this column matches the target
+                    for _, win in ipairs(col) do
+                        if _matchesTarget(win, target) then
+                            result[#result + 1] = col
+                            used[col_idx] = true
+                            break
+                        end
+                    end
+                    if used[col_idx] then break end
+                end
+            end
+        end
+    end
+
+    -- Append remaining columns in original order
+    for col_idx, col in ipairs(window_list) do
+        if not used[col_idx] then
+            result[#result + 1] = col
+        end
+    end
+
+    return result
+end
+
 ---park a single window off-screen: mark hidden, stop watcher, save frame, move
 ---@param id number window id
 ---@param win userdata hs.window ref (used to read frame)
@@ -208,6 +275,26 @@ local function _initialPark()
     -- have completed yet — refreshWindows does the same work synchronously.
     codex.windows.refreshWindows()
 
+    -- Ensure all visible windows are assigned to a workspace. The ws_filter
+    -- subscription may not have fired for windows that were already visible
+    -- at startup (especially after hs.reload with the deactivated bug).
+    -- Only assign here — don't call onWindowCreated which would park windows
+    -- before _initialPark can build snapshots from the tiling state.
+    for _, win in ipairs(codex.window_filter:getWindows()) do
+        local id = win:id()
+        if id and not win_ws[id] then
+            local app = win:application()
+            if app then win_pid[id] = app:pid() end
+            local wsName = resolveWorkspace(win) or current
+            ws_windows[wsName] = ws_windows[wsName] or {}
+            ws_windows[wsName][id] = true
+            win_ws[id] = wsName
+            if ws_layout[wsName] == "unmanaged" then
+                codex.state.is_floating[id] = true
+            end
+        end
+    end
+
     local park_x, park_y = parkCoords()
 
     -- Pause events to avoid per-window retiling
@@ -240,6 +327,13 @@ local function _initialPark()
                     end
                 end
             end
+        end
+    end
+
+    -- Reorder non-current workspace snapshots to match column specs
+    for ws_name, snap in pairs(ws_snapshots) do
+        if snap.window_list then
+            snap.window_list = _reorderColumns(snap.window_list, ws_name)
         end
     end
 
@@ -281,6 +375,16 @@ local function _initialPark()
     codex.events.paused = false
     codex:tileSpace(space)
 
+    -- Reorder current workspace columns to match spec, then retile
+    if ws_columns[current] then
+        local snap = codex.state.snapshotSpace(space)
+        if snap and snap.window_list and #snap.window_list > 0 then
+            snap.window_list = _reorderColumns(snap.window_list, current)
+            codex.state.restoreSpace(space, snap)
+            codex:tileSpace(space)
+        end
+    end
+
     switching = false
 end
 
@@ -304,19 +408,20 @@ local function _expandApps(apps)
 
             if entry.jump then
                 jump_targets[entry.jump] = jump_targets[entry.jump] or {}
-                if entry.title or entry.launch then
+                if entry.title or entry.launch or entry.autoLaunch then
                     jump_targets[entry.jump][entry.workspace] = {
                         app = appName,
                         title = entry.title,
                         launch = entry.launch,
+                        autoLaunch = entry.autoLaunch or false,
                     }
                 else
                     jump_targets[entry.jump][entry.workspace] = appName
                 end
             end
 
-            if entry.focusFollows == false then
-                focus_follows_off[appName] = true
+            if entry.focusFollows then
+                focus_follows[appName] = true
             end
         end
     end
@@ -328,7 +433,7 @@ function Workspaces.setup(opts)
     local names_raw = opts.workspaces or {}
     toggle_back = opts.toggleBack or false
 
-    -- Parse workspace list: string → scrolling, table → use .layout
+    -- Parse workspace list: string → scrolling, table → use .layout + .columns
     local names = {}
     for _, entry in ipairs(names_raw) do
         if type(entry) == "string" then
@@ -337,8 +442,13 @@ function Workspaces.setup(opts)
         else
             names[#names + 1] = entry.name
             ws_layout[entry.name] = entry.layout or "scrolling"
+            if entry.columns then
+                ws_columns[entry.name] = entry.columns
+            end
         end
     end
+
+    ws_names = names
 
     -- App-centric config vs legacy
     if opts.apps then
@@ -351,8 +461,8 @@ function Workspaces.setup(opts)
         for appName, wsName in pairs(rules) do
             app_rules[appName] = wsName
         end
-        for _, appName in ipairs(opts.focusFollowsOff or {}) do
-            focus_follows_off[appName] = true
+        for _, appName in ipairs(opts.focusFollows or {}) do
+            focus_follows[appName] = true
         end
     end
 
@@ -417,6 +527,37 @@ function Workspaces.setup(opts)
 
     -- Park non-current workspace windows synchronously (was Timer.doAfter(1.0))
     _initialPark()
+
+    -- Auto-launch missing apps that have autoLaunch=true
+    local all_wins = codex.window_filter:getWindows()
+    local wins_by_id = {}
+    for _, w in ipairs(all_wins) do
+        local wid = w:id()
+        if wid then wins_by_id[wid] = w end
+    end
+    for category, targets in pairs(jump_targets) do
+        for wsName, target in pairs(targets) do
+            if type(target) == "table" and target.autoLaunch then
+                local found = false
+                for id in pairs(ws_windows[wsName] or {}) do
+                    local w = wins_by_id[id]
+                    if w and _matchesTarget(w, target) then
+                        found = true
+                        break
+                    end
+                end
+                if not found then
+                    codex.logger.df("autoLaunch: launching %s for %s/%s", category, wsName, target.app)
+                    if target.launch then
+                        hs.task.new(target.launch[1], nil,
+                            table.move(target.launch, 2, #target.launch, 1, {})):start()
+                    else
+                        hs.application.launchOrFocus(target.app)
+                    end
+                end
+            end
+        end
+    end
 end
 
 ---build restore and park move operations for a workspace switch
@@ -574,7 +715,19 @@ local function _doSwitch(name)
     -- 1. Save last focused window for old workspace
     local focused = Window.focusedWindow()
     if focused and focused:id() then
-        ws_focused[old] = focused:id()
+        local fid = focused:id()
+        local fapp = focused:application()
+        local fname = fapp and fapp:title() or "?"
+        local belongs = win_ws[fid] == old
+        if belongs then
+            ws_focused[old] = fid
+            codex.logger.i("focus-save: %s -> %d (%s)", old, fid, fname)
+        else
+            codex.logger.i("focus-save: SKIP %s — focused window %d (%s) belongs to %s, keeping ws_focused=%s",
+                old, fid, fname, tostring(win_ws[fid]), tostring(ws_focused[old]))
+        end
+    else
+        codex.logger.i("focus-save: %s — no focused window, keeping ws_focused=%s", old, tostring(ws_focused[old]))
     end
 
     -- 2. Stop UI watchers for old workspace windows
@@ -641,7 +794,13 @@ local function _doSwitch(name)
     local t_lookup = hs.timer.absoluteTime()
 
     if focus_win then
+        local rapp = focus_win:application()
+        local rname = rapp and rapp:title() or "?"
+        codex.logger.i("focus-restore: %s -> %d (%s) [ws_focused=%s]",
+            name, focus_win:id(), rname, tostring(ws_focused[name]))
         focus_win:focus()
+    else
+        codex.logger.i("focus-restore: %s — no target found [ws_focused=%s]", name, tostring(ws_focused[name]))
     end
 
     -- 10. Unpause events (keep paused on unmanaged) and clear switching guard
@@ -677,6 +836,30 @@ function Workspaces.switchTo(name)
     end
     saveJumpPoint()
     _doSwitch(name)
+end
+
+---switch to the next workspace in order (wraps around)
+function Workspaces.nextWorkspace()
+    if #ws_names < 2 then return end
+    for i, name in ipairs(ws_names) do
+        if name == current then
+            local target = ws_names[i % #ws_names + 1]
+            Workspaces.switchTo(target)
+            return
+        end
+    end
+end
+
+---switch to the previous workspace in order (wraps around)
+function Workspaces.prevWorkspace()
+    if #ws_names < 2 then return end
+    for i, name in ipairs(ws_names) do
+        if name == current then
+            local target = ws_names[(i - 2) % #ws_names + 1]
+            Workspaces.switchTo(target)
+            return
+        end
+    end
 end
 
 ---move the focused window to a different workspace
@@ -751,6 +934,25 @@ function Workspaces.moveWindowTo(name)
     end
 end
 
+---reflow the current workspace's layout to match its column spec
+---@param name string|nil workspace name, defaults to current
+function Workspaces.reflowLayout(name)
+    name = name or current
+    if not ws_columns[name] then return end
+
+    local screen = Screen.mainScreen()
+    if not screen then return end
+    local space = Spaces.activeSpaces()[screen:getUUID()]
+    if not space then return end
+
+    local snap = codex.state.snapshotSpace(space)
+    if not snap or not snap.window_list or #snap.window_list == 0 then return end
+
+    snap.window_list = _reorderColumns(snap.window_list, name)
+    codex.state.restoreSpace(space, snap)
+    codex:tileSpace(space)
+end
+
 ---assign a window to the correct workspace (called on window creation)
 ---@param win userdata hs.window
 function Workspaces.onWindowCreated(win)
@@ -823,10 +1025,9 @@ function Workspaces.onWindowDestroyed(win)
     if prev_jump and prev_jump.window_id == id then
         prev_jump = nil
     end
-    -- Clear app_jump_from if it pointed to this window
-    if wsName and app_jump_from[wsName] == id then
-        app_jump_from[wsName] = nil
-    end
+    -- Clear mark / mark_return if they pointed to this window
+    if mark and mark.window_id == id then mark = nil end
+    if mark_return and mark_return.window_id == id then mark_return = nil end
 end
 
 ---handle window focus — switch workspace if focused window is on a different one
@@ -839,7 +1040,7 @@ function Workspaces.onWindowFocused(win)
     if codex.state.isHidden(id) then
         local app = win:application()
         local appName = app and app:title()
-        if not appName or focus_follows_off[appName] then return end
+        if not appName or not focus_follows[appName] then return end
     end
 
     -- Track last-focused on current workspace
@@ -855,6 +1056,7 @@ function Workspaces.onWindowFocused(win)
         focus_timer = nil
         local now_focused = Window.focusedWindow()
         if now_focused and now_focused:id() == id and win_ws[id] and win_ws[id] ~= current then
+            ws_focused[win_ws[id]] = id
             _doSwitch(win_ws[id])
         end
     end)
@@ -913,96 +1115,134 @@ function Workspaces.dump()
         end
         table.insert(output, string.format("  %s%s: %s", name, marker, table.concat(wins, ", ")))
     end
+    if mark then
+        table.insert(output, string.format("  mark: %s/%d", mark.workspace, mark.window_id))
+    end
+    if mark_return then
+        table.insert(output, string.format("  mark_return: %s/%d", mark_return.workspace, mark_return.window_id))
+    end
     codex.logger.i(table.concat(output, "\n"))
 end
 
----jump to a specific app category on the current workspace
----@param category string e.g. "browser", "terminal", "llm", "comms"
-function Workspaces.jumpToApp(category)
-    local targets = jump_targets[category]
-    if not targets then return end
-    local target = targets[current]
-    if not target then return end
+---adopt the focused window into the current workspace (rescue orphans)
+function Workspaces.rescueWindow()
+    local win = Window.focusedWindow()
+    if not win then codex.logger.d("rescueWindow: no focused window"); return end
+    local id = win:id()
+    if not id then codex.logger.d("rescueWindow: no window id"); return end
 
-    -- Normalize: plain string → { app = name }
-    local appName, titlePattern, launchCmd
-    if type(target) == "string" then
-        appName = target
-    else
-        appName = target.app
-        titlePattern = target.title
-        launchCmd = target.launch
+    -- Constrain the window frame to the canvas so tileSpace doesn't overflow
+    local function constrainToCanvas()
+        local screen = Screen.mainScreen()
+        if not screen then return end
+        local canvas = codex.windows.getCanvas(screen)
+        local frame = win:frame()
+        if frame.w > canvas.w then frame.w = canvas.w end
+        if frame.h > canvas.h then frame.h = canvas.h end
+        codex.windows.moveWindow(win, frame)
     end
-    if not appName then return end
 
-    -- Toggle-back: if focused window IS the target, toggle back to app_jump_from
-    if toggle_back then
-        local focused = Window.focusedWindow()
-        if focused then
-            local fid = focused:id()
-            if fid and (ws_windows[current] or {})[fid] then
-                local is_target = false
-                if titlePattern then
-                    local cache_key = category .. ":" .. current
-                    local cached = jump_window[cache_key]
-                    is_target = cached and cached:id() == fid
-                else
-                    local app = focused:application()
-                    is_target = app and app:title() == appName
-                end
-                if is_target then
-                    local from_id = app_jump_from[current]
-                    if from_id and ws_windows[current] and ws_windows[current][from_id] then
-                        -- Swap: next toggle returns here
-                        app_jump_from[current] = fid
-                        local win = Window.get(from_id)
-                        if win then win:focus() end
-                        return
-                    end
-                    -- No saved jump-from point: fall through to normal focus
-                end
+    local existing = win_ws[id]
+    if existing == current then
+        -- Already on this workspace — but maybe not in tiling state.
+        -- Ensure it's not hidden and try to add it.
+        codex.state.setHidden(id, nil)
+        local screen = Screen.mainScreen()
+        if screen then
+            local space = Spaces.activeSpaces()[screen:getUUID()]
+            if space and not codex.state.windowIndex(win) then
+                constrainToCanvas()
+                codex.windows.addWindow(win)
+                codex:tileSpace(space)
             end
         end
+        codex.logger.df("rescueWindow: re-added %d to current workspace %s", id, current)
+        return
     end
 
-    -- Save workspace-local jump point for app-jump toggle
+    if existing then
+        -- Tracked on a different workspace — move it here
+        constrainToCanvas()
+        Workspaces.moveWindowTo(current)
+        codex.logger.df("rescueWindow: moved %d from %s to %s", id, existing, current)
+        return
+    end
+
+    -- Completely untracked — adopt into current workspace
+    local app = win:application()
+    if app then win_pid[id] = app:pid() end
+    ws_windows[current] = ws_windows[current] or {}
+    ws_windows[current][id] = true
+    win_ws[id] = current
+    codex.state.setHidden(id, nil)
+
+    if ws_layout[current] == "unmanaged" then
+        codex.state.is_floating[id] = true
+    end
+
+    local screen = Screen.mainScreen()
+    if screen then
+        local space = Spaces.activeSpaces()[screen:getUUID()]
+        if space then
+            constrainToCanvas()
+            codex.windows.addWindow(win)
+            codex:tileSpace(space)
+        end
+    end
+    codex.logger.df("rescueWindow: adopted untracked %d into %s", id, current)
+end
+
+---set the current focused window as a persistent mark
+function Workspaces.setMark()
     local focused = Window.focusedWindow()
-    if focused and focused:id() then
-        app_jump_from[current] = focused:id()
+    if not focused then return end
+    local id = focused:id()
+    if not id then return end
+    mark = { workspace = current, window_id = id }
+end
+
+---jump to the marked window, or toggle back if already there
+function Workspaces.jumpToMark()
+    if not mark then return end
+
+    local focused = Window.focusedWindow()
+    local fid = focused and focused:id()
+
+    -- At the mark? Toggle back to mark_return
+    if fid == mark.window_id then
+        if not mark_return then return end
+        local target_ws = mark_return.workspace
+        local target_wid = mark_return.window_id
+        -- Save current as new mark_return before jumping back
+        mark_return = { workspace = current, window_id = fid }
+        if target_ws ~= current then
+            if target_wid then ws_focused[target_ws] = target_wid end
+            _doSwitch(target_ws)
+        else
+            if target_wid and ws_windows[current] and ws_windows[current][target_wid] then
+                local win = Window.get(target_wid)
+                if win then win:focus() end
+            end
+        end
+        return
     end
 
-    -- Title-pattern targets: use cached window ref (set by onWindowCreated)
-    if titlePattern then
-        local cache_key = category .. ":" .. current
-        local cached = jump_window[cache_key]
-        if cached then
-            local id = cached:id()
-            if id and (ws_windows[current] or {})[id] then
-                cached:focus()
-                return
-            end
-            jump_window[cache_key] = nil  -- stale
-        end
-    else
-        -- Simple targets (single-process apps): find by app name
-        local app = hs.application.find(appName)
-        if app then
-            local ws_ids = ws_windows[current] or {}
-            for _, win in ipairs(app:allWindows()) do
-                local id = win:id()
-                if id and ws_ids[id] then
-                    win:focus()
-                    return
-                end
-            end
-        end
+    -- Save current position as mark_return
+    if fid then
+        mark_return = { workspace = current, window_id = fid }
     end
 
-    -- No matching window — launch
-    if launchCmd then
-        hs.task.new(launchCmd[1], nil, table.move(launchCmd, 2, #launchCmd, 1, {})):start()
+    -- Jump to mark
+    local target_ws = mark.workspace
+    local target_wid = mark.window_id
+    if target_ws ~= current then
+        if target_wid then ws_focused[target_ws] = target_wid end
+        _doSwitch(target_ws)
     else
-        hs.application.launchOrFocus(appName)
+        if target_wid and ws_windows[current] and ws_windows[current][target_wid] then
+            local win = Window.get(target_wid)
+            if win then win:focus() end
+        end
     end
 end
 
