@@ -208,6 +208,26 @@ local function _initialPark()
     -- have completed yet — refreshWindows does the same work synchronously.
     codex.windows.refreshWindows()
 
+    -- Ensure all visible windows are assigned to a workspace. The ws_filter
+    -- subscription may not have fired for windows that were already visible
+    -- at startup (especially after hs.reload with the deactivated bug).
+    -- Only assign here — don't call onWindowCreated which would park windows
+    -- before _initialPark can build snapshots from the tiling state.
+    for _, win in ipairs(codex.window_filter:getWindows()) do
+        local id = win:id()
+        if id and not win_ws[id] then
+            local app = win:application()
+            if app then win_pid[id] = app:pid() end
+            local wsName = resolveWorkspace(win) or current
+            ws_windows[wsName] = ws_windows[wsName] or {}
+            ws_windows[wsName][id] = true
+            win_ws[id] = wsName
+            if ws_layout[wsName] == "unmanaged" then
+                codex.state.is_floating[id] = true
+            end
+        end
+    end
+
     local park_x, park_y = parkCoords()
 
     -- Pause events to avoid per-window retiling
