@@ -121,6 +121,10 @@ function Codex:start()
     self.events.start()
     print(string.format("[start] events.start: %dms", _ms(t)))
 
+    if self.disable_app_hide then
+        self._hide_hotkey = hs.hotkey.bind({"cmd"}, "h", function() end)
+    end
+
     return self
 end
 
@@ -129,6 +133,11 @@ end
 function Codex:stop()
     -- stop events
     self.events.stop()
+
+    if self._hide_hotkey then
+        self._hide_hotkey:delete()
+        self._hide_hotkey = nil
+    end
 
     -- fit all windows within the bounds of the screen
     for _, window in ipairs(self.window_filter:getWindows()) do
