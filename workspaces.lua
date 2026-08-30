@@ -42,7 +42,6 @@ local jump_window = {}   -- "category:workspace" -> window ref (lazy-validated c
 local prev_jump = nil    -- { workspace = name, window_id = id } for toggle-jump
 local mark = nil         -- { workspace, window_id } — user-set anchor
 local mark_return = nil  -- { workspace, window_id } — auto-saved on jump-to-mark
-local app_jump_from = {} -- workspace_name -> window_id (for app-jump toggle)
 
 ---user callback, called with workspace name after switching
 ---@type fun(name: string)|nil
@@ -1029,10 +1028,6 @@ function Workspaces.onWindowDestroyed(win)
     -- Clear mark / mark_return if they pointed to this window
     if mark and mark.window_id == id then mark = nil end
     if mark_return and mark_return.window_id == id then mark_return = nil end
-    -- Clear app_jump_from if it pointed to this window
-    if wsName and app_jump_from[wsName] == id then
-        app_jump_from[wsName] = nil
-    end
 end
 
 ---handle window focus — switch workspace if focused window is on a different one
@@ -1127,96 +1122,6 @@ function Workspaces.dump()
         table.insert(output, string.format("  mark_return: %s/%d", mark_return.workspace, mark_return.window_id))
     end
     codex.logger.i(table.concat(output, "\n"))
-end
-
----jump to a specific app category on the current workspace
----@param category string e.g. "browser", "terminal", "llm", "comms"
-function Workspaces.jumpToApp(category)
-    local targets = jump_targets[category]
-    if not targets then return end
-    local target = targets[current]
-    if not target then return end
-
-    -- Normalize: plain string → { app = name }
-    local appName, titlePattern, launchCmd
-    if type(target) == "string" then
-        appName = target
-    else
-        appName = target.app
-        titlePattern = target.title
-        launchCmd = target.launch
-    end
-    if not appName then return end
-
-    -- Toggle-back: if focused window IS the target, toggle back to app_jump_from
-    if toggle_back then
-        local focused = Window.focusedWindow()
-        if focused then
-            local fid = focused:id()
-            if fid and (ws_windows[current] or {})[fid] then
-                local is_target = false
-                if titlePattern then
-                    local cache_key = category .. ":" .. current
-                    local cached = jump_window[cache_key]
-                    is_target = cached and cached:id() == fid
-                else
-                    local app = focused:application()
-                    is_target = app and app:title() == appName
-                end
-                if is_target then
-                    local from_id = app_jump_from[current]
-                    if from_id and ws_windows[current] and ws_windows[current][from_id] then
-                        -- Swap: next toggle returns here
-                        app_jump_from[current] = fid
-                        local win = Window.get(from_id)
-                        if win then win:focus() end
-                        return
-                    end
-                    -- No saved jump-from point: fall through to normal focus
-                end
-            end
-        end
-    end
-
-    -- Save workspace-local jump point for app-jump toggle
-    local focused = Window.focusedWindow()
-    if focused and focused:id() then
-        app_jump_from[current] = focused:id()
-    end
-
-    -- Title-pattern targets: use cached window ref (set by onWindowCreated)
-    if titlePattern then
-        local cache_key = category .. ":" .. current
-        local cached = jump_window[cache_key]
-        if cached then
-            local id = cached:id()
-            if id and (ws_windows[current] or {})[id] then
-                cached:focus()
-                return
-            end
-            jump_window[cache_key] = nil  -- stale
-        end
-    else
-        -- Simple targets (single-process apps): find by app name
-        local app = hs.application.find(appName)
-        if app then
-            local ws_ids = ws_windows[current] or {}
-            for _, win in ipairs(app:allWindows()) do
-                local id = win:id()
-                if id and ws_ids[id] then
-                    win:focus()
-                    return
-                end
-            end
-        end
-    end
-
-    -- No matching window — launch
-    if launchCmd then
-        hs.task.new(launchCmd[1], nil, table.move(launchCmd, 2, #launchCmd, 1, {})):start()
-    else
-        hs.application.launchOrFocus(appName)
-    end
 end
 
 ---adopt the focused window into the current workspace (rescue orphans)
