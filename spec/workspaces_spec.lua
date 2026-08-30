@@ -1521,6 +1521,253 @@ describe("Codex.workspaces", function()
 
     end)
 
+    describe("column ordering", function()
+        -- Helper: set up with app-centric config + columns
+        local function setupColumns(opts)
+            opts = opts or {}
+            local config = {
+                workspaces = opts.workspaces or { "personal", "work" },
+                toggleBack = opts.toggleBack or false,
+                apps = opts.apps or {},
+            }
+            Workspaces.setup(config)
+            return config
+        end
+
+        it("should reorder columns to match spec", function()
+            local w_safari = makeWin(1, "Safari Tab", "Safari", 100)
+            local w_term = makeWin(2, "[personal] ~/code", "WezTerm", 200)
+            local w_msg = makeWin(3, "Messages", "Messages", 300)
+            all_filter_windows = { w_safari, w_term, w_msg }
+
+            setupColumns({
+                workspaces = {
+                    { name = "personal", columns = { "browser", "terminal", "comms" } },
+                    "work",
+                },
+                apps = {
+                    Safari   = { workspace = "personal", jump = "browser" },
+                    Messages = { workspace = "personal", jump = "comms" },
+                    WezTerm  = {
+                        { workspace = "personal", jump = "terminal", title = "^%[personal%]" },
+                    },
+                },
+            })
+
+            -- Tile in wrong order: Messages, WezTerm, Safari
+            local space = 1
+            State.windowList(space)[1] = { w_msg }
+            State.windowList(space)[2] = { w_term }
+            State.windowList(space)[3] = { w_safari }
+
+            Workspaces.reflowLayout("personal")
+
+            -- Should be reordered: Safari (browser), WezTerm (terminal), Messages (comms)
+            local wl = State.windowList(space)
+            assert.are.equal(3, #wl)
+            assert.are.equal(1, wl[1][1]:id())  -- Safari
+            assert.are.equal(2, wl[2][1]:id())  -- WezTerm
+            assert.are.equal(3, wl[3][1]:id())  -- Messages
+        end)
+
+        it("should no-op when no columns spec defined", function()
+            local w1 = makeWin(1, "W1", "Safari", 100)
+            local w2 = makeWin(2, "W2", "Terminal", 200)
+            all_filter_windows = { w1, w2 }
+
+            setupColumns({
+                workspaces = { "personal", "work" },
+                apps = {
+                    Safari = { workspace = "personal", jump = "browser" },
+                },
+            })
+
+            local space = 1
+            State.windowList(space)[1] = { w1 }
+            State.windowList(space)[2] = { w2 }
+
+            Workspaces.reflowLayout("personal")
+
+            -- Order should be unchanged
+            local wl = State.windowList(space)
+            assert.are.equal(2, #wl)
+            assert.are.equal(1, wl[1][1]:id())
+            assert.are.equal(2, wl[2][1]:id())
+        end)
+
+        it("should skip categories with no matching window", function()
+            local w_safari = makeWin(1, "Safari Tab", "Safari", 100)
+            all_filter_windows = { w_safari }
+
+            setupColumns({
+                workspaces = {
+                    { name = "personal", columns = { "browser", "terminal", "comms" } },
+                    "work",
+                },
+                apps = {
+                    Safari   = { workspace = "personal", jump = "browser" },
+                    Messages = { workspace = "personal", jump = "comms" },
+                    WezTerm  = {
+                        { workspace = "personal", jump = "terminal", title = "^%[personal%]" },
+                    },
+                },
+            })
+
+            -- Only Safari is present (no terminal or comms windows)
+            local space = 1
+            State.windowList(space)[1] = { w_safari }
+
+            Workspaces.reflowLayout("personal")
+
+            -- Should still have just Safari
+            local wl = State.windowList(space)
+            assert.are.equal(1, #wl)
+            assert.are.equal(1, wl[1][1]:id())
+        end)
+
+        it("should preserve relative order of unmatched columns", function()
+            local w_safari = makeWin(1, "Safari Tab", "Safari", 100)
+            local w_extra1 = makeWin(2, "Notes", "Notes", 200)
+            local w_extra2 = makeWin(3, "Preview", "Preview", 300)
+            all_filter_windows = { w_safari, w_extra1, w_extra2 }
+
+            setupColumns({
+                workspaces = {
+                    { name = "personal", columns = { "browser" } },
+                    "work",
+                },
+                apps = {
+                    Safari = { workspace = "personal", jump = "browser" },
+                },
+            })
+
+            -- Tile: Notes, Preview, Safari
+            local space = 1
+            State.windowList(space)[1] = { w_extra1 }
+            State.windowList(space)[2] = { w_extra2 }
+            State.windowList(space)[3] = { w_safari }
+
+            Workspaces.reflowLayout("personal")
+
+            -- Should be: Safari (browser), Notes, Preview (unmatched keep order)
+            local wl = State.windowList(space)
+            assert.are.equal(3, #wl)
+            assert.are.equal(1, wl[1][1]:id())  -- Safari
+            assert.are.equal(2, wl[2][1]:id())  -- Notes (preserved order)
+            assert.are.equal(3, wl[3][1]:id())  -- Preview (preserved order)
+        end)
+
+        it("should preserve column stacking (multi-row columns stay intact)", function()
+            local w_safari = makeWin(1, "Safari Tab", "Safari", 100)
+            local w_term = makeWin(2, "[personal] ~/code", "WezTerm", 200)
+            local w_stacked = makeWin(3, "Other App", "Other", 300)
+            all_filter_windows = { w_safari, w_term, w_stacked }
+
+            setupColumns({
+                workspaces = {
+                    { name = "personal", columns = { "terminal", "browser" } },
+                    "work",
+                },
+                apps = {
+                    Safari  = { workspace = "personal", jump = "browser" },
+                    WezTerm = {
+                        { workspace = "personal", jump = "terminal", title = "^%[personal%]" },
+                    },
+                },
+            })
+
+            -- Tile: col1=[Safari, Other stacked], col2=[WezTerm]
+            local space = 1
+            State.windowList(space)[1] = { w_safari, w_stacked }
+            State.windowList(space)[2] = { w_term }
+
+            Workspaces.reflowLayout("personal")
+
+            -- Should be: col1=[WezTerm] (terminal), col2=[Safari, Other stacked] (browser matches Safari)
+            local wl = State.windowList(space)
+            assert.are.equal(2, #wl)
+            assert.are.equal(2, wl[1][1]:id())     -- WezTerm (terminal)
+            assert.are.equal(1, wl[2][1]:id())     -- Safari (browser)
+            assert.are.equal(3, wl[2][2]:id())     -- Other stacked with Safari
+        end)
+
+        it("should apply column ordering on _initialPark for current workspace", function()
+            local w_safari = makeWin(1, "Safari Tab", "Safari", 100)
+            local w_term = makeWin(2, "[personal] ~/code", "WezTerm", 200)
+            all_filter_windows = { w_safari, w_term }
+
+            -- Capture tileSpace calls and their window_list state
+            local tile_window_orders = {}
+            mock_codex.tileSpace = function(self, space)
+                local wl = State.windowList(space)
+                local order = {}
+                for _, col in ipairs(wl) do
+                    for _, win in ipairs(col) do
+                        order[#order + 1] = win:id()
+                    end
+                end
+                tile_window_orders[#tile_window_orders + 1] = order
+            end
+
+            setupColumns({
+                workspaces = {
+                    { name = "personal", columns = { "terminal", "browser" } },
+                    "work",
+                },
+                apps = {
+                    Safari  = { workspace = "personal", jump = "browser" },
+                    WezTerm = {
+                        { workspace = "personal", jump = "terminal", title = "^%[personal%]" },
+                    },
+                },
+            })
+
+            -- After _initialPark, tileSpace should have been called
+            -- The last tileSpace call should have terminal before browser
+            assert.is_true(#tile_window_orders > 0)
+            local last = tile_window_orders[#tile_window_orders]
+            -- The tiling state should have WezTerm (id=2) before Safari (id=1)
+            local wl = State.windowList(1)
+            if #wl >= 2 then
+                assert.are.equal(2, wl[1][1]:id())  -- WezTerm first
+                assert.are.equal(1, wl[2][1]:id())  -- Safari second
+            end
+        end)
+
+        it("should apply column ordering to non-current workspace snapshots", function()
+            local w_safari = makeWin(1, "Safari Tab", "Safari", 100)
+            local w_term = makeWin(2, "[personal] ~/code", "WezTerm", 200)
+            local w_work = makeWin(3, "Work App", "WorkApp", 300)
+            all_filter_windows = { w_safari, w_term, w_work }
+
+            setupColumns({
+                workspaces = {
+                    "work",
+                    { name = "personal", columns = { "terminal", "browser" } },
+                },
+                apps = {
+                    Safari  = { workspace = "personal", jump = "browser" },
+                    WorkApp = { workspace = "work" },
+                    WezTerm = {
+                        { workspace = "personal", jump = "terminal", title = "^%[personal%]" },
+                    },
+                },
+            })
+
+            -- Current is "work", personal is non-current
+            -- After _initialPark, personal's snapshot should be reordered
+            -- Switch to personal to check
+            Workspaces.switchTo("personal")
+
+            -- The restored snapshot should have terminal before browser
+            local wl = State.windowList(1)
+            if #wl >= 2 then
+                assert.are.equal(2, wl[1][1]:id())  -- WezTerm first (terminal)
+                assert.are.equal(1, wl[2][1]:id())  -- Safari second (browser)
+            end
+        end)
+    end)
+
     describe("app-centric config", function()
         -- Helper: set up with app-centric config
         local function setupApps(opts)

@@ -32,6 +32,7 @@ local screen_changed = false  -- set by screen watcher, forces retile on next sw
 local ws_pending = {}         -- name -> { {id=number, win=window_ref}, ... }
 local screen_watcher = nil    -- hs.screen.watcher instance
 local ws_layout = {}    -- name -> "scrolling" | "unmanaged"
+local ws_columns = {}   -- name -> ordered list of jump categories (e.g., {"browser","terminal"})
 local ws_filter = nil    -- separate window filter for workspace lifecycle hooks
 local toggle_back = false -- when true, pressing the same switch/jump key toggles back
 local focus_follows = {} -- appName -> true (apps that trigger workspace switch on focus)
@@ -160,6 +161,70 @@ local function _removePendingEntry(ws, id)
     if #p == 0 then ws_pending[ws] = nil end
 end
 
+---check if a window matches a jump target entry
+---@param win userdata hs.window
+---@param target string|table jump target (app name string or {app, title} table)
+---@return boolean
+local function _matchesTarget(win, target)
+    if type(target) == "string" then
+        local app = win:application()
+        if not app then return false end
+        return stripInvisible(app:title()) == target
+    end
+    if type(target) == "table" and target.title then
+        local title = win:title()
+        if title and title:match(target.title) then return true end
+    elseif type(target) == "table" and target.app then
+        local app = win:application()
+        if not app then return false end
+        return stripInvisible(app:title()) == target.app
+    end
+    return false
+end
+
+---reorder columns to match the workspace's column spec
+---matched columns come first (in spec order), then remaining columns in original order
+---@param window_list table array of columns (each column is an array of window refs)
+---@param workspace_name string workspace name
+---@return table reordered window_list
+local function _reorderColumns(window_list, workspace_name)
+    local columns = ws_columns[workspace_name]
+    if not columns or #columns == 0 then return window_list end
+
+    local result = {}
+    local used = {}  -- set of original column indices already placed
+
+    -- For each category in the spec, find the first matching column
+    for _, category in ipairs(columns) do
+        local targets = jump_targets[category]
+        local target = targets and targets[workspace_name]
+        if target then
+            for col_idx, col in ipairs(window_list) do
+                if not used[col_idx] then
+                    -- Check if any window in this column matches the target
+                    for _, win in ipairs(col) do
+                        if _matchesTarget(win, target) then
+                            result[#result + 1] = col
+                            used[col_idx] = true
+                            break
+                        end
+                    end
+                    if used[col_idx] then break end
+                end
+            end
+        end
+    end
+
+    -- Append remaining columns in original order
+    for col_idx, col in ipairs(window_list) do
+        if not used[col_idx] then
+            result[#result + 1] = col
+        end
+    end
+
+    return result
+end
+
 ---park a single window off-screen: mark hidden, stop watcher, save frame, move
 ---@param id number window id
 ---@param win userdata hs.window ref (used to read frame)
@@ -263,6 +328,13 @@ local function _initialPark()
         end
     end
 
+    -- Reorder non-current workspace snapshots to match column specs
+    for ws_name, snap in pairs(ws_snapshots) do
+        if snap.window_list then
+            snap.window_list = _reorderColumns(snap.window_list, ws_name)
+        end
+    end
+
     -- Build id→ref lookup from filter (Window.get calls allWindows internally
     -- and can fail during hs.reload when AX hasn't caught up yet)
     local all_wins = codex.window_filter:getWindows()
@@ -300,6 +372,16 @@ local function _initialPark()
 
     codex.events.paused = false
     codex:tileSpace(space)
+
+    -- Reorder current workspace columns to match spec, then retile
+    if ws_columns[current] then
+        local snap = codex.state.snapshotSpace(space)
+        if snap and snap.window_list and #snap.window_list > 0 then
+            snap.window_list = _reorderColumns(snap.window_list, current)
+            codex.state.restoreSpace(space, snap)
+            codex:tileSpace(space)
+        end
+    end
 
     switching = false
 end
@@ -348,7 +430,7 @@ function Workspaces.setup(opts)
     local names_raw = opts.workspaces or {}
     toggle_back = opts.toggleBack or false
 
-    -- Parse workspace list: string → scrolling, table → use .layout
+    -- Parse workspace list: string → scrolling, table → use .layout + .columns
     local names = {}
     for _, entry in ipairs(names_raw) do
         if type(entry) == "string" then
@@ -357,6 +439,9 @@ function Workspaces.setup(opts)
         else
             names[#names + 1] = entry.name
             ws_layout[entry.name] = entry.layout or "scrolling"
+            if entry.columns then
+                ws_columns[entry.name] = entry.columns
+            end
         end
     end
 
@@ -787,6 +872,25 @@ function Workspaces.moveWindowTo(name)
             end
         end
     end
+end
+
+---reflow the current workspace's layout to match its column spec
+---@param name string|nil workspace name, defaults to current
+function Workspaces.reflowLayout(name)
+    name = name or current
+    if not ws_columns[name] then return end
+
+    local screen = Screen.mainScreen()
+    if not screen then return end
+    local space = Spaces.activeSpaces()[screen:getUUID()]
+    if not space then return end
+
+    local snap = codex.state.snapshotSpace(space)
+    if not snap or not snap.window_list or #snap.window_list == 0 then return end
+
+    snap.window_list = _reorderColumns(snap.window_list, name)
+    codex.state.restoreSpace(space, snap)
+    codex:tileSpace(space)
 end
 
 ---assign a window to the correct workspace (called on window creation)
