@@ -32,6 +32,7 @@ local screen_changed = false  -- set by screen watcher, forces retile on next sw
 local ws_pending = {}         -- name -> { {id=number, win=window_ref}, ... }
 local screen_watcher = nil    -- hs.screen.watcher instance
 local ws_layout = {}    -- name -> "scrolling" | "unmanaged"
+local ws_names = {}     -- ordered list of workspace names (for prev/next cycling)
 local ws_columns = {}   -- name -> ordered list of jump categories (e.g., {"browser","terminal"})
 local ws_filter = nil    -- separate window filter for workspace lifecycle hooks
 local toggle_back = false -- when true, pressing the same switch/jump key toggles back
@@ -446,6 +447,8 @@ function Workspaces.setup(opts)
         end
     end
 
+    ws_names = names
+
     -- App-centric config vs legacy
     if opts.apps then
         _expandApps(opts.apps)
@@ -832,6 +835,30 @@ function Workspaces.switchTo(name)
     end
     saveJumpPoint()
     _doSwitch(name)
+end
+
+---switch to the next workspace in order (wraps around)
+function Workspaces.nextWorkspace()
+    if #ws_names < 2 then return end
+    for i, name in ipairs(ws_names) do
+        if name == current then
+            local target = ws_names[i % #ws_names + 1]
+            Workspaces.switchTo(target)
+            return
+        end
+    end
+end
+
+---switch to the previous workspace in order (wraps around)
+function Workspaces.prevWorkspace()
+    if #ws_names < 2 then return end
+    for i, name in ipairs(ws_names) do
+        if name == current then
+            local target = ws_names[(i - 2) % #ws_names + 1]
+            Workspaces.switchTo(target)
+            return
+        end
+    end
 end
 
 ---move the focused window to a different workspace

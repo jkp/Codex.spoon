@@ -1845,6 +1845,44 @@ describe("Codex.workspaces", function()
         end)
     end)
 
+    describe("nextWorkspace / prevWorkspace", function()
+        it("should cycle forward through workspaces", function()
+            setupStandard()  -- personal, work, global
+            assert.are.equal("personal", Workspaces.currentSpace())
+
+            Workspaces.nextWorkspace()
+            assert.are.equal("work", Workspaces.currentSpace())
+
+            Workspaces.nextWorkspace()
+            assert.are.equal("global", Workspaces.currentSpace())
+        end)
+
+        it("should wrap around forward", function()
+            setupStandard()
+            Workspaces.nextWorkspace()  -- work
+            Workspaces.nextWorkspace()  -- global
+            Workspaces.nextWorkspace()  -- personal (wrap)
+            assert.are.equal("personal", Workspaces.currentSpace())
+        end)
+
+        it("should cycle backward through workspaces", function()
+            setupStandard()
+            Workspaces.prevWorkspace()  -- global (wrap backward)
+            assert.are.equal("global", Workspaces.currentSpace())
+
+            Workspaces.prevWorkspace()
+            assert.are.equal("work", Workspaces.currentSpace())
+        end)
+
+        it("should wrap around backward", function()
+            setupStandard()
+            Workspaces.prevWorkspace()  -- global
+            Workspaces.prevWorkspace()  -- work
+            Workspaces.prevWorkspace()  -- personal
+            assert.are.equal("personal", Workspaces.currentSpace())
+        end)
+    end)
+
     describe("app-centric config", function()
         -- Helper: set up with app-centric config
         local function setupApps(opts)
