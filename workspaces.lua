@@ -594,7 +594,19 @@ local function _doSwitch(name)
     -- 1. Save last focused window for old workspace
     local focused = Window.focusedWindow()
     if focused and focused:id() then
-        ws_focused[old] = focused:id()
+        local fid = focused:id()
+        local fapp = focused:application()
+        local fname = fapp and fapp:title() or "?"
+        local belongs = win_ws[fid] == old
+        if belongs then
+            ws_focused[old] = fid
+            codex.logger.i("focus-save: %s -> %d (%s)", old, fid, fname)
+        else
+            codex.logger.i("focus-save: SKIP %s — focused window %d (%s) belongs to %s, keeping ws_focused=%s",
+                old, fid, fname, tostring(win_ws[fid]), tostring(ws_focused[old]))
+        end
+    else
+        codex.logger.i("focus-save: %s — no focused window, keeping ws_focused=%s", old, tostring(ws_focused[old]))
     end
 
     -- 2. Stop UI watchers for old workspace windows
@@ -661,7 +673,13 @@ local function _doSwitch(name)
     local t_lookup = hs.timer.absoluteTime()
 
     if focus_win then
+        local rapp = focus_win:application()
+        local rname = rapp and rapp:title() or "?"
+        codex.logger.i("focus-restore: %s -> %d (%s) [ws_focused=%s]",
+            name, focus_win:id(), rname, tostring(ws_focused[name]))
         focus_win:focus()
+    else
+        codex.logger.i("focus-restore: %s — no target found [ws_focused=%s]", name, tostring(ws_focused[name]))
     end
 
     -- 10. Unpause events (keep paused on unmanaged) and clear switching guard
@@ -875,6 +893,7 @@ function Workspaces.onWindowFocused(win)
         focus_timer = nil
         local now_focused = Window.focusedWindow()
         if now_focused and now_focused:id() == id and win_ws[id] and win_ws[id] ~= current then
+            ws_focused[win_ws[id]] = id
             _doSwitch(win_ws[id])
         end
     end)
