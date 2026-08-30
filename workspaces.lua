@@ -227,10 +227,27 @@ local function _reorderColumns(window_list, workspace_name)
     return result
 end
 
+---record a window as pending insertion into its workspace's tiling state.
+---Snapshots only cover windows that were tiled when the snapshot was taken, so
+---a window parked before it was ever tiled is invisible to the restore path.
+---@param id number window id
+---@param win userdata hs.window ref
+local function _recordPending(id, win)
+    local ws = win_ws[id]
+    if not ws then return end
+    ws_pending[ws] = ws_pending[ws] or {}
+    local p = ws_pending[ws]
+    for i = #p, 1, -1 do
+        if p[i].id == id then table.remove(p, i) end
+    end
+    p[#p + 1] = { id = id, win = win }
+end
+
 ---park a single window off-screen: mark hidden, stop watcher, save frame, move
 ---@param id number window id
 ---@param win userdata hs.window ref (used to read frame)
 local function _parkWindow(id, win)
+    _recordPending(id, win)
     codex.state.setHidden(id, true)
     codex.state.uiWatcherStop(id)
     ws_frames[id] = win:frame()
@@ -894,13 +911,9 @@ function Workspaces.moveWindowTo(name)
         codex.state.is_floating[id] = nil
     end
 
-    -- Track moved window for direct insertion on next switch (deduplicate)
-    ws_pending[name] = ws_pending[name] or {}
-    local p = ws_pending[name]
-    for i = #p, 1, -1 do
-        if p[i].id == id then table.remove(p, i) end
-    end
-    p[#p + 1] = { id = id, win = win }
+    -- Track moved window for direct insertion on next switch. _parkWindow also
+    -- records, but a move to the current workspace never parks.
+    _recordPending(id, win)
     ws_focused[name] = id  -- focus the moved window when we switch to target
 
     -- If target is not current workspace, park the window
