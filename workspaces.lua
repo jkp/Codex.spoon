@@ -406,11 +406,12 @@ local function _expandApps(apps)
 
             if entry.jump then
                 jump_targets[entry.jump] = jump_targets[entry.jump] or {}
-                if entry.title or entry.launch then
+                if entry.title or entry.launch or entry.autoLaunch then
                     jump_targets[entry.jump][entry.workspace] = {
                         app = appName,
                         title = entry.title,
                         launch = entry.launch,
+                        autoLaunch = entry.autoLaunch or false,
                     }
                 else
                     jump_targets[entry.jump][entry.workspace] = appName
@@ -522,6 +523,37 @@ function Workspaces.setup(opts)
 
     -- Park non-current workspace windows synchronously (was Timer.doAfter(1.0))
     _initialPark()
+
+    -- Auto-launch missing apps that have autoLaunch=true
+    local all_wins = codex.window_filter:getWindows()
+    local wins_by_id = {}
+    for _, w in ipairs(all_wins) do
+        local wid = w:id()
+        if wid then wins_by_id[wid] = w end
+    end
+    for category, targets in pairs(jump_targets) do
+        for wsName, target in pairs(targets) do
+            if type(target) == "table" and target.autoLaunch then
+                local found = false
+                for id in pairs(ws_windows[wsName] or {}) do
+                    local w = wins_by_id[id]
+                    if w and _matchesTarget(w, target) then
+                        found = true
+                        break
+                    end
+                end
+                if not found then
+                    codex.logger.df("autoLaunch: launching %s for %s/%s", category, wsName, target.app)
+                    if target.launch then
+                        hs.task.new(target.launch[1], nil,
+                            table.move(target.launch, 2, #target.launch, 1, {})):start()
+                    else
+                        hs.application.launchOrFocus(target.app)
+                    end
+                end
+            end
+        end
+    end
 end
 
 ---build restore and park move operations for a workspace switch

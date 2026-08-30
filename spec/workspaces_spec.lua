@@ -1768,6 +1768,83 @@ describe("Codex.workspaces", function()
         end)
     end)
 
+    describe("autoLaunch", function()
+        it("should launch app when no matching window exists on setup", function()
+            -- No windows at all
+            all_filter_windows = {}
+
+            local launched = {}
+            hs.task.new = function(cmd, cb, args)
+                return {
+                    start = function(self)
+                        launched[#launched + 1] = { cmd = cmd, args = args }
+                        return self
+                    end,
+                }
+            end
+
+            local config = {
+                workspaces = { "personal", "work" },
+                apps = {
+                    WezTerm = {
+                        { workspace = "work", jump = "terminal", title = "^%[work%]",
+                          launch = { "/usr/bin/wezterm", "connect", "work" },
+                          autoLaunch = true },
+                    },
+                },
+            }
+            Workspaces.setup(config)
+
+            assert.are.equal(1, #launched)
+            assert.are.equal("/usr/bin/wezterm", launched[1].cmd)
+        end)
+
+        it("should not launch when matching window already exists", function()
+            local w1 = makeWin(1, "[work] ~/project", "WezTerm", 100)
+            all_filter_windows = { w1 }
+
+            local launched = {}
+            hs.task.new = function(cmd, cb, args)
+                return {
+                    start = function(self)
+                        launched[#launched + 1] = { cmd = cmd, args = args }
+                        return self
+                    end,
+                }
+            end
+
+            local config = {
+                workspaces = { "personal", "work" },
+                apps = {
+                    WezTerm = {
+                        { workspace = "work", jump = "terminal", title = "^%[work%]",
+                          launch = { "/usr/bin/wezterm", "connect", "work" },
+                          autoLaunch = true },
+                    },
+                },
+            }
+            Workspaces.setup(config)
+
+            assert.are.equal(0, #launched)
+        end)
+
+        it("should use launchOrFocus for simple app targets", function()
+            all_filter_windows = {}
+
+            local launch_spy = spy.on(hs.application, "launchOrFocus")
+
+            local config = {
+                workspaces = { "personal", "work" },
+                apps = {
+                    Safari = { workspace = "personal", jump = "browser", autoLaunch = true },
+                },
+            }
+            Workspaces.setup(config)
+
+            assert.spy(launch_spy).was.called_with("Safari")
+        end)
+    end)
+
     describe("app-centric config", function()
         -- Helper: set up with app-centric config
         local function setupApps(opts)
