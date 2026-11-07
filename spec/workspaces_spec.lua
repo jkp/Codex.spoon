@@ -150,6 +150,35 @@ describe("Codex.workspaces", function()
             setupStandard()
         end)
 
+        it("should re-park hidden windows with a full winmove op when the screen changes", function()
+            local w1 = makeWin(1, "Terminal", "Terminal", 100)
+            local w2 = makeWin(2, "Browser", "Safari", 200)
+            all_filter_windows = { w1, w2 }
+
+            local on_screen_change
+            local orig_new = hs.screen.watcher.new
+            hs.screen.watcher.new = function(fn)
+                on_screen_change = fn
+                return orig_new(fn)
+            end
+            local async_ops
+            mock_codex.transport.moveWindowsAsync = function(ops) async_ops = ops end
+
+            setupStandard({ appRules = { Safari = "work" } })
+            hs.screen.watcher.new = orig_new
+            on_screen_change()
+
+            -- winmove rejects the whole batch unless every op has x, y, w and h
+            assert.equals(1, #async_ops)
+            local op = async_ops[1]
+            assert.equals(2, op.id)
+            for _, k in ipairs({ "pid", "x", "y", "w", "h" }) do
+                assert.is_number(op[k], "op." .. k)
+            end
+            assert.equals(0, op.w)
+            assert.equals(0, op.h)
+        end)
+
         it("should call refreshWindows synchronously during setup", function()
             local refresh_called = false
             mock_codex.windows.refreshWindows = function() refresh_called = true end
