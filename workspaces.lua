@@ -526,7 +526,7 @@ function Workspaces.setup(opts)
             if codex.state.isHidden(id) and ws ~= current then
                 local pid = win_pid[id]
                 if pid then
-                    ops[#ops + 1] = { id = id, pid = pid, x = park_x, y = park_y }
+                    ops[#ops + 1] = { id = id, pid = pid, x = park_x, y = park_y, w = 0, h = 0 }
                 end
             end
         end
