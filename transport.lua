@@ -48,7 +48,8 @@ local function buildJsonOps(ops)
         if pid then
             json_ops[#json_ops + 1] = {
                 wid = op.id, pid = pid,
-                x = op.x, y = op.y, w = op.w, h = op.h,
+                -- winmove requires w/h; 0 means move without resizing
+                x = op.x, y = op.y, w = op.w or 0, h = op.h or 0,
             }
         end
     end
